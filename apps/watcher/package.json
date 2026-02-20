@@ -1,0 +1,29 @@
+{
+  "name": "watcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx/esm src/watcher.ts",
+    "autopilot:start": "node --import tsx/esm src/autopilot/index.ts",
+    "autopilot:policy-gate": "node --import tsx/esm src/autopilot/policyGate.ts",
+    "autopilot:replay": "node --import tsx/esm src/autopilot/replay.ts",
+    "autopilot:verify": "node --import tsx/esm src/autopilot/verifier.ts",
+    "autopilot:deploy": "node --import tsx/esm src/autopilot/deploy.ts",
+    "autopilot:provenance:generate": "node --import tsx/esm src/autopilot/provenance.ts generate",
+    "autopilot:provenance:verify": "node --import tsx/esm src/autopilot/provenance.ts verify",
+    "test": "node --import tsx/esm --test \"src/**/*.test.ts\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ssa/shared": "workspace:*",
+    "dotenv": "^16.4.7",
+    "viem": "^2.46.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,9 @@
+export const aaveOracleAbi = [
+  {
+    type: "function",
+    name: "getAssetPrice",
+    stateMutability: "view",
+    inputs: [{ name: "asset", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }]
+  }
+] as const;

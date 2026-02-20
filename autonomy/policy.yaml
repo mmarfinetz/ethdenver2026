@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "mode": {
+    "default_phase": 1,
+    "require_human_approval_default": true,
+    "allow_direct_main_push": false
+  },
+  "allowed": {
+    "paths": [
+      "apps/agent/src/policy/**",
+      "apps/agent/src/scheduler.ts",
+      "apps/agent/src/metrics.ts",
+      "apps/watcher/src/autopilot/**",
+      "autonomy/**",
+      "apps/dashboard/src/lib/queries.ts",
+      "apps/dashboard/src/lib/viem.ts",
+      "apps/dashboard/src/app/page.tsx",
+      "apps/dashboard/.env.example",
+      "packages/shared/src/types.ts",
+      "apps/agent/src/storage.ts",
+      "apps/agent/src/agent.ts",
+      "apps/agent/.env.example",
+      "apps/agent/package.json",
+      "apps/agent/tsconfig.json",
+      "apps/watcher/.env.example",
+      "apps/watcher/package.json",
+      "apps/watcher/tsconfig.json",
+      "contracts/test/**",
+      "contracts/package.json",
+      "packages/shared/tsconfig.json",
+      "package.json",
+      "docs/autonomy-operations.md",
+      "README.md"
+    ]
+  },
+  "forbidden": {
+    "paths": [
+      "packages/shared/src/constants.ts",
+      "apps/agent/src/config.ts",
+      "apps/agent/src/chain.ts",
+      "apps/agent/src/policy/hfMath.ts",
+      "apps/watcher/src/watcher.ts",
+      "contracts/src/**"
+    ],
+    "symbols": [
+      "packages/shared/src/constants.ts:BASE_MAINNET_CHAIN_ID",
+      "packages/shared/src/constants.ts:BASE_SEPOLIA_CHAIN_ID",
+      "packages/shared/src/constants.ts:CHAIN_DEFAULTS",
+      "packages/shared/src/constants.ts:USDC_DECIMALS",
+      "apps/agent/src/config.ts:hfTargetWad",
+      "apps/agent/src/config.ts:hfBufferWad",
+      "apps/watcher/src/watcher.ts:triggerShutdown"
+    ]
+  },
+  "limits": {
+    "max_files_changed": 40,
+    "max_added_lines": 1600,
+    "max_deleted_lines": 900
+  },
+  "risk": {
+    "timelock_hours": 24,
+    "timelock_required_if": [
+      "touches:apps/agent/src/policy/**",
+      "touches:apps/agent/src/scheduler.ts",
+      "changes_numeric_literal_over_pct:20"
+    ]
+  },
+  "verification": {
+    "required_commands": [
+      "pnpm --filter watcher autopilot:replay",
+      "pnpm typecheck",
+      "pnpm build",
+      "pnpm --filter agent test",
+      "pnpm --filter contracts test"
+    ],
+    "replay_requirements": {
+      "candidate_must_not_increase_hf_breach_count": true,
+      "candidate_must_not_increase_failure_count": true,
+      "candidate_must_not_increase_runway_collapse_count": true,
+      "candidate_must_preserve_or_improve_success_rate": true,
+      "candidate_must_preserve_or_improve_net_delta": true
+    }
+  },
+  "deployment": {
+    "shadow_canary_cycles": 50,
+    "live_canary_min_runs": 25,
+    "max_consecutive_failures": 3,
+    "max_error_rate_regression_pct": 15,
+    "hf_floor_wad": "1100000000000000000",
+    "rollback_triggers": [
+      "hf_floor_breach",
+      "excess_consecutive_failures",
+      "unexpected_runway_dead",
+      "canary_slo_regression"
+    ]
+  },
+  "provenance": {
+    "artifact_paths": [
+      "apps/agent/dist/**",
+      "apps/watcher/dist/**"
+    ],
+    "manifest_path": "autonomy/artifacts/manifest.json",
+    "attestation_path": "autonomy/artifacts/attestation.json",
+    "signature_path": "autonomy/artifacts/manifest.sig"
+  },
+  "override_controls": {
+    "emergency_stop_env": "AUTOPILOT_EMERGENCY_STOP",
+    "approval_mode_env": "AUTOPILOT_REQUIRE_HUMAN_APPROVAL",
+    "timelock_env": "AUTOPILOT_TIMELOCK_HOURS",
+    "approval_file_env": "AUTOPILOT_APPROVAL_FILE"
+  },
+  "rollout": {
+    "phases": [
+      {
+        "phase": 1,
+        "name": "PR Suggestions Only",
+        "capabilities": [
+          "proposal"
+        ],
+        "exit_criteria": [
+          "30+ PRs with zero forbidden-diff incidents",
+          "No safety regressions from accepted PRs"
+        ]
+      },
+      {
+        "phase": 2,
+        "name": "Auto-Merge Low-Risk PRs",
+        "capabilities": [
+          "proposal",
+          "auto_merge_low_risk"
+        ],
+        "exit_criteria": [
+          "30 days stable operation with zero rollback-triggering regressions"
+        ]
+      },
+      {
+        "phase": 3,
+        "name": "Autonomous Canary Deploy",
+        "capabilities": [
+          "proposal",
+          "auto_merge_low_risk",
+          "deploy_canary"
+        ],
+        "exit_criteria": [
+          "60 days stable canary promotions with successful auto-rollback drills"
+        ]
+      },
+      {
+        "phase": 4,
+        "name": "Expanded Autonomy (Guarded)",
+        "capabilities": [
+          "proposal",
+          "auto_merge_low_risk",
+          "deploy_canary",
+          "promote_production"
+        ],
+        "exit_criteria": [
+          "Governance-approved expansion with unchanged forbidden safety set"
+        ]
+      }
+    ],
+    "trust_model": [
+      "Autopilot is untrusted for direct production mutation",
+      "CI policy gate and branch protection are trusted enforcement layers",
+      "Deployment trusts only signed attested CI artifacts",
+      "Human operators retain hard override authority"
+    ]
+  }
+}

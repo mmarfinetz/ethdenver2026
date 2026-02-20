@@ -1,0 +1,24 @@
+{
+  "name": "self-sustaining-onchain-agent-base",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "corepack pnpm -r build",
+    "typecheck": "corepack pnpm -r typecheck",
+    "agent:start": "corepack pnpm --filter agent start",
+    "agent:dry-run": "corepack pnpm --filter agent dry-run",
+    "dashboard:dev": "corepack pnpm --filter dashboard dev",
+    "dashboard:build": "corepack pnpm --filter dashboard build",
+    "watcher:start": "corepack pnpm --filter watcher start",
+    "watcher:autopilot": "corepack pnpm --filter watcher autopilot:start",
+    "watcher:policy-gate": "corepack pnpm --filter watcher autopilot:policy-gate",
+    "watcher:verify": "corepack pnpm --filter watcher autopilot:verify",
+    "tui:start": "corepack pnpm --filter tui start",
+    "e2e:sepolia:preflight": "bash scripts/e2e/base-sepolia/remote-e2e.sh preflight",
+    "e2e:sepolia:deploy-registry": "bash scripts/e2e/base-sepolia/remote-e2e.sh deploy-registry",
+    "e2e:sepolia:run": "bash scripts/e2e/base-sepolia/remote-e2e.sh run",
+    "e2e:sepolia:sync-champion": "bash scripts/e2e/base-sepolia/remote-e2e.sh sync-champion",
+    "e2e:sepolia:all": "bash scripts/e2e/base-sepolia/remote-e2e.sh all"
+  }
+}

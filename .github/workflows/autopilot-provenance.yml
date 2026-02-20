@@ -1,0 +1,63 @@
+name: Autopilot Provenance
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build watcher/agent artifacts
+        run: |
+          pnpm --filter agent build
+          pnpm --filter watcher build
+
+      - name: Generate provenance bundle
+        env:
+          AUTOPILOT_COMMIT_SHA: ${{ github.sha }}
+          AUTOPILOT_MODEL_ID: ${{ vars.AUTOPILOT_MODEL_ID || 'gpt-5' }}
+          AUTOPILOT_POLICY_VERSION: "1"
+          AUTOPILOT_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.AUTOPILOT_SIGNING_PRIVATE_KEY_PEM }}
+          AUTOPILOT_SIGNING_KEY_ID: ${{ vars.AUTOPILOT_SIGNING_KEY_ID || 'autopilot-ci' }}
+        run: pnpm --filter watcher autopilot:provenance:generate
+
+      - name: Verify provenance bundle
+        env:
+          AUTOPILOT_EXPECTED_COMMIT_SHA: ${{ github.sha }}
+          AUTOPILOT_SIGNING_PUBLIC_KEY_PEM: ${{ secrets.AUTOPILOT_SIGNING_PUBLIC_KEY_PEM }}
+          AUTOPILOT_PROVENANCE_REQUIRE_SIGNATURE: "true"
+        run: pnpm --filter watcher autopilot:provenance:verify
+
+      - name: Upload provenance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autopilot-provenance-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            autonomy/artifacts/manifest.json
+            autonomy/artifacts/attestation.json
+            autonomy/artifacts/manifest.sig
+            apps/agent/dist/**
+            apps/watcher/dist/**

@@ -1,0 +1,12 @@
+{
+  "name": "contracts",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test --offline -vv",
+    "deploy:aa:base": "forge script script/DeployAA.s.sol:DeployAA --rpc-url $BASE_RPC_URL --broadcast",
+    "deploy:aa:base-sepolia": "forge script script/DeployAA.s.sol:DeployAA --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast",
+    "deploy:champion-registry:base-sepolia": "forge script script/DeployChampionRegistry.s.sol:DeployChampionRegistry --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast"
+  }
+}

@@ -1,0 +1,44 @@
+# Node
+node_modules
+pnpm-lock.yaml
+
+# Build outputs
+dist
+.next
+out
+coverage
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+scripts/e2e/base-sepolia/e2e.env
+
+# Metrics
+/tmp/self-sustaining-agent
+*.ndjson
+autonomy/artifacts
+autonomy/reports
+autonomy/proposals
+apps/watcher/data
+
+# Foundry
+contracts/lib
+contracts/cache
+contracts/out
+contracts/broadcast
+
+# AI / Agent config
+.claude/
+AGENTS.md
+CLAUDE.md
+*.rapidgpt
+
+# Secrets & keys
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
