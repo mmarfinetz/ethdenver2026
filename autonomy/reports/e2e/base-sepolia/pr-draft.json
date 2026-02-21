@@ -1,0 +1,11 @@
+{
+  "proposalId": "autopilot-ccb5ae50454f",
+  "branch": "autopilot/autopilot-ccb5ae50454f",
+  "baseBranch": "main",
+  "title": "chore(autopilot): tune policy parameters (autopilot-ccb5ae50454f)",
+  "body": "Autopilot proposal generated at 2026-02-21T02:05:50.898Z.\n\n## Summary\nGenerated 5 parameter update suggestions\n\n## Parameter changes\n- `HF_BUFFER`: `0.10` -> `0.11` (Error rate 31.3% exceeded 20%; increasing HF buffer for safety)\n- `COMPUTE_BUFFER_BPS`: `2000` -> `2400` (Detected 9 dead-runway runs; increasing compute cost safety margin)\n- `RUNWAY_ELEVATED_DAYS`: `7` -> `8` (Dead-runway events observed; widening elevated urgency runway threshold)\n- `MAX_LOOPS`: `5` -> `4` (High error rate suggests reducing compounded loop attempts)\n- `LOOP_BORROW_BPS`: `3500` -> `3150` (Reducing loop leverage aggressiveness under sustained failures)\n\n## Policy\n- Scoped by autonomy/policy.yaml\n- No direct push to protected branches",
+  "mode": "execute",
+  "status": "draft_only",
+  "warnings": [],
+  "createdAt": "2026-02-21T02:05:50.918Z"
+}
