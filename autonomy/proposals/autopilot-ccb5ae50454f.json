@@ -1,0 +1,54 @@
+{
+  "proposalId": "autopilot-ccb5ae50454f",
+  "createdAt": "2026-02-21T01:33:46.465Z",
+  "phase": 3,
+  "summary": "Generated 5 parameter update suggestions",
+  "proposals": [
+    {
+      "key": "HF_BUFFER",
+      "current": "0.10",
+      "proposed": "0.11",
+      "reason": "Error rate 31.3% exceeded 20%; increasing HF buffer for safety"
+    },
+    {
+      "key": "COMPUTE_BUFFER_BPS",
+      "current": "2000",
+      "proposed": "2400",
+      "reason": "Detected 9 dead-runway runs; increasing compute cost safety margin"
+    },
+    {
+      "key": "RUNWAY_ELEVATED_DAYS",
+      "current": "7",
+      "proposed": "8",
+      "reason": "Dead-runway events observed; widening elevated urgency runway threshold"
+    },
+    {
+      "key": "MAX_LOOPS",
+      "current": "5",
+      "proposed": "4",
+      "reason": "High error rate suggests reducing compounded loop attempts"
+    },
+    {
+      "key": "LOOP_BORROW_BPS",
+      "current": "3500",
+      "proposed": "3150",
+      "reason": "Reducing loop leverage aggressiveness under sustained failures"
+    }
+  ],
+  "sourceMetrics": {
+    "totalRuns": 16,
+    "okRuns": 0,
+    "errorRuns": 5,
+    "skippedRuns": 11,
+    "dryRunCount": 16,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 0.3125,
+    "minHealthFactorWad": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "hfBreachCount": 0,
+    "runwayDeadCount": 9,
+    "netDeltaUsdSum": "-395587",
+    "consecutiveFailures": 3,
+    "latestTimestamp": "2026-02-21T01:15:07.961Z"
+  }
+}
