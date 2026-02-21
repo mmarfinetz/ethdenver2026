@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx src/agent.ts",
     "dry-run": "DRY_RUN=true tsx src/agent.ts",
-    "test": "node --import tsx/esm --test src/**/*.test.ts",
+    "test": "node --import tsx/esm --test \"src/*.test.ts\" \"src/**/*.test.ts\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json"
   },
