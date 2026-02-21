@@ -54,6 +54,11 @@ require_path "$REPO_DIR/package.json"
 require_path "$REPO_DIR/apps/agent/.env"
 require_path "$REPO_DIR/apps/watcher/.env"
 
+PNPM_INSTALL_FLAG="--frozen-lockfile"
+if [[ ! -f "$REPO_DIR/pnpm-lock.yaml" ]]; then
+  PNPM_INSTALL_FLAG="--no-frozen-lockfile"
+fi
+
 info "repoDir=$REPO_DIR user=$RUN_USER group=$RUN_GROUP servicePrefix=$SERVICE_PREFIX"
 
 upsert_env_key "$REPO_DIR/apps/watcher/.env" "SHUTDOWN_COMMAND" "systemctl stop ${AGENT_SERVICE}"
@@ -62,7 +67,7 @@ info "running mainnet preflight checks"
 sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && bash scripts/vps/preflight-mainnet.sh"
 
 info "installing dependencies and building agent/watcher"
-sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm install --frozen-lockfile"
+sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm install $PNPM_INSTALL_FLAG"
 sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm --filter agent build"
 sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm --filter watcher build"
 

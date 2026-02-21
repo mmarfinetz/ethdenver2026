@@ -26,6 +26,11 @@ require_path() {
 require_path "$REPO_DIR/.git"
 require_path "$REPO_DIR/package.json"
 
+PNPM_INSTALL_FLAG="--frozen-lockfile"
+if [[ ! -f "$REPO_DIR/pnpm-lock.yaml" ]]; then
+  PNPM_INSTALL_FLAG="--no-frozen-lockfile"
+fi
+
 if [[ -z "$BRANCH" ]]; then
   BRANCH="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)"
 fi
@@ -43,7 +48,7 @@ git -C "$REPO_DIR" checkout "$BRANCH"
 git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
 
 info "installing dependencies and building"
-bash -lc "cd '$REPO_DIR' && corepack pnpm install --frozen-lockfile"
+bash -lc "cd '$REPO_DIR' && corepack pnpm install $PNPM_INSTALL_FLAG"
 bash -lc "cd '$REPO_DIR' && corepack pnpm --filter agent build"
 bash -lc "cd '$REPO_DIR' && corepack pnpm --filter watcher build"
 
