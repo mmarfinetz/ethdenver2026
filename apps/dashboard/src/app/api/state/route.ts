@@ -1,6 +1,12 @@
 import { queryDashboardState } from "../../../lib/queries";
 
 export const dynamic = "force-dynamic";
+const JSON_HEADERS = {
+  "content-type": "application/json",
+  "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  pragma: "no-cache",
+  expires: "0"
+};
 
 function jsonReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
@@ -12,9 +18,7 @@ export async function GET() {
     const state = await queryDashboardState();
     return new Response(JSON.stringify(state, jsonReplacer), {
       status: 200,
-      headers: {
-        "content-type": "application/json"
-      }
+      headers: JSON_HEADERS
     });
   } catch (error) {
     return new Response(
@@ -23,9 +27,7 @@ export async function GET() {
       }),
       {
         status: 500,
-        headers: {
-          "content-type": "application/json"
-        }
+        headers: JSON_HEADERS
       }
     );
   }

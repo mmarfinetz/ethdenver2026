@@ -591,17 +591,15 @@ export function TerminalConsole(props: TerminalConsoleProps) {
     let frameHandle = 0;
     let width = 0;
     let height = 0;
-    let start = performance.now();
+    const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let observer: ResizeObserver | null = null;
 
     const resize = () => {
-      const rect = shell.getBoundingClientRect();
       const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-      width = Math.max(320, Math.floor(rect.width));
-      height = Math.max(220, Math.floor(rect.height));
+      width = Math.max(320, shell.clientWidth);
+      height = Math.max(220, shell.clientHeight);
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
@@ -611,17 +609,22 @@ export function TerminalConsole(props: TerminalConsoleProps) {
       frameHandle = window.requestAnimationFrame(loop);
     };
 
-    const observer = new ResizeObserver(() => {
-      resize();
-    });
-
-    observer.observe(shell);
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        resize();
+      });
+      observer.observe(shell);
+    } else {
+      window.addEventListener("resize", resize);
+    }
     resize();
+    renderFace(context, width, height, 0);
     frameHandle = window.requestAnimationFrame(loop);
 
     return () => {
       window.cancelAnimationFrame(frameHandle);
-      observer.disconnect();
+      if (observer) observer.disconnect();
+      window.removeEventListener("resize", resize);
     };
   }, []);
 
@@ -712,6 +715,8 @@ export function TerminalConsole(props: TerminalConsoleProps) {
 
         canvas {
           display: block;
+          position: absolute;
+          inset: 0;
           width: 100%;
           height: 100%;
         }
