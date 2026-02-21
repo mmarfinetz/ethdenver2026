@@ -35,8 +35,16 @@ function pickAllowanceTarget(payload: Record<string, unknown>): string {
   throw new Error("0x quote missing allowance target");
 }
 
+function pickTransactionField(payload: Record<string, unknown>, field: "to" | "data" | "value"): unknown {
+  if (payload[field] != null) return payload[field];
+
+  const tx = payload.transaction as Record<string, unknown> | undefined;
+  return tx?.[field];
+}
+
 export async function getSwapQuote(config: AgentConfig, params: QuoteParams): Promise<SwapQuote> {
   const url = new URL(config.zrxApiUrl);
+  url.searchParams.set("chainId", String(config.chainId));
   url.searchParams.set("sellToken", params.sellToken);
   url.searchParams.set("buyToken", params.buyToken);
   url.searchParams.set("taker", params.taker);
@@ -75,14 +83,16 @@ export async function getSwapQuote(config: AgentConfig, params: QuoteParams): Pr
     throw new Error("0x quote reports no liquidity");
   }
 
-  const to = parseAddress(String(payload.to), "0x.to");
+  const to = parseAddress(String(pickTransactionField(payload, "to")), "0x.to");
   const allowanceTarget = parseAddress(pickAllowanceTarget(payload), "0x.allowanceTarget");
+  const data = pickTransactionField(payload, "data");
+  const value = pickTransactionField(payload, "value");
 
   return {
     to,
     allowanceTarget,
-    data: String(payload.data) as Hex,
-    value: BigInt(String(payload.value ?? "0")),
+    data: String(data) as Hex,
+    value: BigInt(String(value ?? "0")),
     sellAmount: BigInt(String(payload.sellAmount ?? "0")),
     buyAmount: BigInt(String(payload.buyAmount ?? "0")),
     minBuyAmount: payload.minBuyAmount ? BigInt(String(payload.minBuyAmount)) : undefined,

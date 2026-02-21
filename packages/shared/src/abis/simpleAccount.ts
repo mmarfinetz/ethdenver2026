@@ -16,6 +16,7 @@ export const simpleAccountAbi = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "dest", type: "address[]" },
+      { name: "value", type: "uint256[]" },
       { name: "func", type: "bytes[]" }
     ],
     outputs: []

@@ -686,7 +686,11 @@ async function planFundEscrowAction(
     value: quote.value
   });
 
-  const availablePostSwapUsdc = idleUsdc + quote.buyAmount;
+  // 0x quotes can include protocol/integrator fees, so `buyAmount` may be
+  // optimistic relative to guaranteed settlement. Use minBuyAmount when present
+  // to avoid over-transferring and reverting on insufficient USDC balance.
+  const settledSwapUsdc = quote.minBuyAmount ?? quote.buyAmount;
+  const availablePostSwapUsdc = idleUsdc + settledSwapUsdc;
   const transferAmount = input.harvestMaxSafe
     ? availablePostSwapUsdc
     : minBigInt(input.targetUsdc, availablePostSwapUsdc);

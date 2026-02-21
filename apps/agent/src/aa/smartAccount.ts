@@ -4,6 +4,7 @@ import {
   decodeFunctionData,
   encodeFunctionData,
   pad,
+  parseAbi,
   type WalletClient
 } from "viem";
 import { readContract } from "viem/actions";
@@ -21,9 +22,6 @@ export type CreateSimpleSmartAccountParams = {
   factoryAddress: Address;
   salt: bigint;
 };
-
-const STUB_SIGNATURE =
-  "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c" as const;
 
 export async function createSimpleSmartAccount(
   params: CreateSimpleSmartAccountParams
@@ -69,12 +67,13 @@ export async function createSimpleSmartAccount(
 
       if (decoded.functionName === "executeBatch") {
         const destinations = decoded.args[0];
-        const calls = decoded.args[1];
+        const values = decoded.args[1];
+        const calls = decoded.args[2];
 
         return destinations.map((destination, index) => ({
           to: destination,
           data: calls[index],
-          value: 0n
+          value: values[index] ?? 0n
         }));
       }
 
@@ -89,17 +88,12 @@ export async function createSimpleSmartAccount(
         });
       }
 
-      for (const call of calls) {
-        if ((call.value ?? 0n) !== 0n) {
-          throw new Error("SimpleAccount.executeBatch only supports value=0 for batched calls");
-        }
-      }
-
       return encodeFunctionData({
         abi: simpleAccountAbi,
         functionName: "executeBatch",
         args: [
           calls.map((call) => call.to),
+          calls.map((call) => call.value ?? 0n),
           calls.map((call) => call.data ?? "0x")
         ]
       });
@@ -122,8 +116,38 @@ export async function createSimpleSmartAccount(
         factoryData
       };
     },
-    async getStubSignature() {
-      return STUB_SIGNATURE;
+    async getNonce() {
+      return readContract(params.walletClient, {
+        abi: parseAbi(["function getNonce(address sender, uint192 key) view returns (uint256)"]),
+        address: params.entryPointAddress,
+        functionName: "getNonce",
+        args: [await this.getAddress(), 0n]
+      });
+    },
+    async getStubSignature(parameters) {
+      if (!parameters) {
+        return ownerAccount.signMessage({
+          message: {
+            raw: "0x00"
+          }
+        });
+      }
+
+      const userOpHash = getUserOperationHash({
+        chainId: parameters.chainId ?? params.walletClient.chain!.id,
+        entryPointAddress: params.entryPointAddress,
+        entryPointVersion: "0.7",
+        userOperation: {
+          ...(parameters as object),
+          sender: parameters.sender ?? (await this.getAddress())
+        } as never
+      });
+
+      return ownerAccount.signMessage({
+        message: {
+          raw: userOpHash
+        }
+      });
     },
     async signMessage(parameters) {
       return ownerAccount.signMessage(parameters);

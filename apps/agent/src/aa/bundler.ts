@@ -30,6 +30,43 @@ export type BundlerContext = {
   entryPointAddress: Address;
 };
 
+type UserOpFeeOverrides = {
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+};
+
+type PimlicoGasPriceTier = {
+  maxFeePerGas?: string;
+  maxPriorityFeePerGas?: string;
+};
+
+type PimlicoGasPriceResponse = {
+  slow?: PimlicoGasPriceTier;
+  standard?: PimlicoGasPriceTier;
+  fast?: PimlicoGasPriceTier;
+};
+
+async function getUserOpFeeOverrides(context: BundlerContext): Promise<UserOpFeeOverrides> {
+  try {
+    const response = (await context.bundlerClient.request({
+      method: "pimlico_getUserOperationGasPrice",
+      params: []
+    })) as PimlicoGasPriceResponse;
+
+    const tier = response.standard ?? response.fast ?? response.slow;
+    if (!tier?.maxFeePerGas || !tier.maxPriorityFeePerGas) {
+      return {};
+    }
+
+    return {
+      maxFeePerGas: BigInt(tier.maxFeePerGas),
+      maxPriorityFeePerGas: BigInt(tier.maxPriorityFeePerGas)
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function createBundlerContext(chain: Chain, bundlerRpcUrl: string, entryPointAddress: Address): BundlerContext {
   const bundlerClient = createBundlerClient({
     chain,
@@ -82,19 +119,22 @@ export async function sendUserOperation(
   }
 
   const paymasterParam = useCircle ? undefined : toPaymasterParam(paymasterClient);
+  const feeOverrides = await getUserOpFeeOverrides(context);
 
   const prepared = await context.bundlerClient.prepareUserOperation({
     account,
     callData: callDataWithSuffix,
     ...(paymasterParam ? { paymaster: paymasterParam } : {}),
-    ...paymasterOverrides
+    ...paymasterOverrides,
+    ...feeOverrides
   } as never);
 
   const userOperation = {
     ...(prepared as object),
     sender: account.address,
     callData: callDataWithSuffix,
-    ...paymasterOverrides
+    ...paymasterOverrides,
+    ...feeOverrides
   } as never;
 
   const signature = await account.signUserOperation(userOperation);
