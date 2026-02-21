@@ -11,7 +11,8 @@ const DECISIONS: AgentRunRecord["decision"][] = [
   "loop",
   "delever",
   "fund-escrow",
-  "pay-escrow"
+  "pay-escrow",
+  "topup-credits"
 ];
 
 function makeRun(decision: AgentRunRecord["decision"], index: number): AgentRunRecord {
@@ -22,6 +23,27 @@ function makeRun(decision: AgentRunRecord["decision"], index: number): AgentRunR
     account: "0x0000000000000000000000000000000000000000",
     decision,
     dryRun: false,
+    creditBalanceUsdc: 1_000_000n + BigInt(index),
+    fundingSource: decision === "topup-credits" ? "conway-credits" : "escrow",
+    topupStatus: decision === "topup-credits" ? "ok" : "not-attempted",
+    topupAmountUsdc: decision === "topup-credits" ? 123_000n : 0n,
+    payerAddress: "0x00000000000000000000000000000000000000aa",
+    payerBalanceUsdc: 500_000n + BigInt(index),
+    payerFundingUsdc: decision === "topup-credits" ? 0n : 10_000n + BigInt(index),
+    computeBurnUsdc: 1_500n,
+    reconciliation: {
+      windowHours: 24,
+      windowStart: new Date(1_700_000_000_000).toISOString(),
+      windowEnd: new Date(1_700_000_000_000 + index * 60_000).toISOString(),
+      payerStartBalanceUsdc: 500_000n,
+      payerEndBalanceUsdc: 510_000n,
+      creditTopupsUsdc: 120_000n,
+      smartAccountFundingUsdc: 40_000n,
+      lhsUsdc: 130_000n,
+      rhsUsdc: 140_000n,
+      withinInvariant: true
+    },
+    fallbackWarning: decision === "topup-credits" ? "Conway balance API temporarily unavailable" : undefined,
     position: {
       totalCollateralBase: 1_000_000_000n,
       totalDebtBase: 500_000_000n,
@@ -100,9 +122,15 @@ test("readRunRecords preserves supported decisions and bigint fields", async () 
       DECISIONS
     );
     assert.equal(runs[0]?.economics.gasPaymentUsdc, 1n);
-    assert.equal(runs[4]?.economics.gasPaymentUsdc, 5n);
+    assert.equal(runs[5]?.economics.gasPaymentUsdc, 6n);
     assert.equal(runs[2]?.runway?.urgency, "elevated");
     assert.equal(runs[2]?.runway?.nominalDays, 14n);
+    assert.equal(runs[5]?.topupStatus, "ok");
+    assert.equal(runs[5]?.topupAmountUsdc, 123_000n);
+    assert.equal(runs[5]?.fundingSource, "conway-credits");
+    assert.equal(runs[4]?.payerFundingUsdc, 10_005n);
+    assert.equal(runs[3]?.computeBurnUsdc, 1_500n);
+    assert.equal(runs[1]?.reconciliation?.withinInvariant, true);
   });
 });
 

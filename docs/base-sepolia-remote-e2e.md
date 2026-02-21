@@ -15,6 +15,7 @@ This runbook validates the full execute-mode autopilot path in a real git remote
 - Base Sepolia RPC URL (`84532`) and funded deployer key.
 - Foundry (`forge`, `cast`) and workspace dependencies installed.
 - `apps/agent/.env` and `apps/watcher/.env` configured for Sepolia (`CHAIN_ID=84532`).
+- If watcher uses Conway billing mode, set `COMPUTE_BILLING_MODE=conway` and `CONWAY_API_BASE_URL` in `apps/watcher/.env`.
 
 ## 2. Configure E2E Env
 

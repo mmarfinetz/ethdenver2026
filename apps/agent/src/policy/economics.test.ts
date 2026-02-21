@@ -15,6 +15,10 @@ function makeRun(gasCostUsd: bigint): AgentRunRecord {
     account: "0x0000000000000000000000000000000000000000",
     decision: "none",
     dryRun: false,
+    creditBalanceUsdc: 0n,
+    fundingSource: "escrow",
+    topupStatus: "not-attempted",
+    topupAmountUsdc: 0n,
     status: "ok",
     position: {
       totalCollateralBase: 0n,
@@ -45,6 +49,7 @@ function makeRun(gasCostUsd: bigint): AgentRunRecord {
       netDeltaUsd: 0n,
       breakEvenEquityUsdApprox: null,
       leverageWad: 0n,
+      gasPaymentUsdc: null,
       notes: []
     },
     risk: {

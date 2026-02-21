@@ -19,8 +19,6 @@ scripts/e2e/base-sepolia/e2e.env
 /tmp/self-sustaining-agent
 *.ndjson
 autonomy/artifacts
-autonomy/reports
-autonomy/proposals
 apps/watcher/data
 
 # Foundry
@@ -39,6 +37,10 @@ CLAUDE.md
 *.pem
 *.key
 
+# Keys
+.keys/
+
 # OS
 .DS_Store
 Thumbs.db
+.vercel

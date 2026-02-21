@@ -1,0 +1,67 @@
+{
+  "baselinePath": "/Users/mitch/ethdenver2026/autonomy/reports/e2e/base-sepolia/baseline-runs.ndjson",
+  "candidatePath": "/Users/mitch/ethdenver2026/autonomy/reports/e2e/base-sepolia/candidate-runs.ndjson",
+  "candidateSource": "command_generated_log",
+  "simulationOnly": false,
+  "baseline": {
+    "totalRuns": 1,
+    "okRuns": 0,
+    "errorRuns": 1,
+    "skippedRuns": 0,
+    "dryRunCount": 1,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 1,
+    "minHealthFactorWad": null,
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "0",
+    "consecutiveFailures": 1,
+    "latestTimestamp": "2026-02-21T02:05:45.054Z"
+  },
+  "candidate": {
+    "totalRuns": 1,
+    "okRuns": 0,
+    "errorRuns": 1,
+    "skippedRuns": 0,
+    "dryRunCount": 1,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 1,
+    "minHealthFactorWad": null,
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "0",
+    "consecutiveFailures": 1,
+    "latestTimestamp": "2026-02-21T02:06:00.810Z"
+  },
+  "checks": [
+    {
+      "name": "hf-breach-count",
+      "ok": true,
+      "detail": "candidate=0 baseline=0"
+    },
+    {
+      "name": "failure-count",
+      "ok": true,
+      "detail": "candidate=1 baseline=1"
+    },
+    {
+      "name": "runway-collapse-count",
+      "ok": true,
+      "detail": "candidate=0 baseline=0"
+    },
+    {
+      "name": "success-rate",
+      "ok": true,
+      "detail": "candidate=0.0000 baseline=0.0000"
+    },
+    {
+      "name": "net-delta",
+      "ok": true,
+      "detail": "candidate=0 baseline=0"
+    }
+  ],
+  "ok": true,
+  "generatedAt": "2026-02-21T02:06:01.636Z"
+}

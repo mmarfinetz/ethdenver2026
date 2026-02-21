@@ -1,4 +1,10 @@
-import type { AgentRunRecord, ComputeRunway, WstEthRateSample } from "@ssa/shared/types";
+import { erc20Abi } from "@ssa/shared/abis";
+import type {
+  AgentRunRecord,
+  ComputeRunway,
+  ConwayReconciliationSnapshot,
+  WstEthRateSample
+} from "@ssa/shared/types";
 import { BPS_DENOMINATOR, WETH_DECIMALS, WSTETH_DECIMALS } from "@ssa/shared/constants";
 import { formatToken, mulDiv, safeSub } from "@ssa/shared/utils";
 import {
@@ -6,7 +12,6 @@ import {
   callBorrow,
   callRepay,
   callSupply,
-  callTransfer,
   callWithdraw,
   readChainSnapshot,
   tokenToUsd,
@@ -14,7 +19,11 @@ import {
   usdcToUsd
 } from "./aave";
 import { createBundlerContext, sendUserOperation, type Call } from "./aa/bundler";
-import { createOptionalPaymasterClient } from "./aa/paymaster";
+import {
+  buildCirclePaymasterApproval,
+  createOptionalPaymasterClient,
+  type CirclePaymasterConfig
+} from "./aa/paymaster";
 import { createSimpleSmartAccount } from "./aa/smartAccount";
 import { applySuffix, buildDataSuffix, callDataHasSuffix } from "./builderCodes";
 import { createChainContext, validateStartup } from "./chain";
@@ -54,6 +63,8 @@ import {
   readRunRecords,
   readStorageState
 } from "./storage";
+import { createComputeBillingProvider, type ComputeBillingProvider } from "./billing";
+import type { Address, PublicClient } from "viem";
 
 const TRAILING_GAS_WINDOW = 50;
 
@@ -65,6 +76,8 @@ type PlannedAction = {
   calls: Call[];
   swapCostUsd: bigint;
   escrowPaymentUsdc: bigint;
+  topupAmountUsdc: bigint;
+  topupReason: string;
   summary: string;
 };
 
@@ -111,6 +124,139 @@ function minBigInt(a: bigint, b: bigint): bigint {
   return a < b ? a : b;
 }
 
+function maxBigInt(a: bigint, b: bigint): bigint {
+  return a > b ? a : b;
+}
+
+function parseTimestampMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inWindow(timestampMs: number | null, windowStartMs: number, windowEndMs: number): boolean {
+  if (timestampMs === null) return false;
+  return timestampMs >= windowStartMs && timestampMs <= windowEndMs;
+}
+
+function sumHistoricalPayerFundingUsdc(runs: AgentRunRecord[], windowStartMs: number, windowEndMs: number): bigint {
+  let total = 0n;
+  for (const run of runs) {
+    if (!inWindow(parseTimestampMs(run.timestamp), windowStartMs, windowEndMs)) continue;
+    if (run.status !== "ok") continue;
+    total += run.payerFundingUsdc ?? 0n;
+  }
+  return total;
+}
+
+function sumHistoricalCreditTopupsUsdc(runs: AgentRunRecord[], windowStartMs: number, windowEndMs: number): bigint {
+  let total = 0n;
+  for (const run of runs) {
+    if (!inWindow(parseTimestampMs(run.timestamp), windowStartMs, windowEndMs)) continue;
+    if (run.topupStatus !== "ok") continue;
+    total += run.topupAmountUsdc;
+  }
+  return total;
+}
+
+function earliestPayerBalanceInWindow(
+  runs: AgentRunRecord[],
+  windowStartMs: number,
+  windowEndMs: number,
+  fallback: bigint
+): bigint {
+  for (const run of runs) {
+    if (!inWindow(parseTimestampMs(run.timestamp), windowStartMs, windowEndMs)) continue;
+    if (run.payerBalanceUsdc == null) continue;
+    return run.payerBalanceUsdc;
+  }
+  return fallback;
+}
+
+function findLastSuccessfulPayerFundingMs(runs: AgentRunRecord[]): number | null {
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const run = runs[i];
+    if (run.status !== "ok") continue;
+    if ((run.payerFundingUsdc ?? 0n) <= 0n) continue;
+    const ts = parseTimestampMs(run.timestamp);
+    if (ts !== null) return ts;
+  }
+  return null;
+}
+
+function findLastSuccessfulTopupMs(runs: AgentRunRecord[]): number | null {
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const run = runs[i];
+    if (run.topupStatus !== "ok") continue;
+    const ts = parseTimestampMs(run.timestamp);
+    if (ts !== null) return ts;
+  }
+  return null;
+}
+
+function cooldownActive(nowMs: number, lastEventMs: number | null, cooldownSeconds: number): boolean {
+  if (cooldownSeconds <= 0 || lastEventMs === null) return false;
+  return nowMs - lastEventMs < cooldownSeconds * 1000;
+}
+
+function clampByBudget(targetUsdc: bigint, perTickCapUsdc: bigint, remainingDailyCapUsdc: bigint): bigint {
+  if (targetUsdc <= 0n || perTickCapUsdc <= 0n || remainingDailyCapUsdc <= 0n) return 0n;
+  return minBigInt(targetUsdc, minBigInt(perTickCapUsdc, remainingDailyCapUsdc));
+}
+
+function buildConwayReconciliationSnapshot(input: {
+  runs: AgentRunRecord[];
+  windowHours: number;
+  nowIso: string;
+  payerEndBalanceUsdc: bigint;
+  currentTopupUsdc: bigint;
+  currentFundingUsdc: bigint;
+  bootstrapUsdc: bigint;
+}): ConwayReconciliationSnapshot {
+  const nowMs = parseTimestampMs(input.nowIso) ?? Date.now();
+  const windowStartMs = nowMs - input.windowHours * 60 * 60 * 1000;
+
+  const historicalTopups = sumHistoricalCreditTopupsUsdc(input.runs, windowStartMs, nowMs);
+  const historicalFunding = sumHistoricalPayerFundingUsdc(input.runs, windowStartMs, nowMs);
+  const payerStartBalanceUsdc = earliestPayerBalanceInWindow(
+    input.runs,
+    windowStartMs,
+    nowMs,
+    input.payerEndBalanceUsdc
+  );
+
+  const creditTopupsUsdc = historicalTopups + input.currentTopupUsdc;
+  const smartAccountFundingUsdc = historicalFunding + input.currentFundingUsdc;
+  const lhsUsdc = creditTopupsUsdc + input.payerEndBalanceUsdc - payerStartBalanceUsdc;
+  const rhsUsdc = smartAccountFundingUsdc + input.bootstrapUsdc;
+
+  return {
+    windowHours: input.windowHours,
+    windowStart: new Date(windowStartMs).toISOString(),
+    windowEnd: input.nowIso,
+    payerStartBalanceUsdc,
+    payerEndBalanceUsdc: input.payerEndBalanceUsdc,
+    creditTopupsUsdc,
+    smartAccountFundingUsdc,
+    lhsUsdc,
+    rhsUsdc,
+    withinInvariant: lhsUsdc <= rhsUsdc
+  };
+}
+
+async function readUsdcBalanceForAddress(
+  client: PublicClient,
+  usdcAddress: Address,
+  address: Address | undefined
+): Promise<bigint | null> {
+  if (!address) return null;
+  return client.readContract({
+    abi: erc20Abi,
+    address: usdcAddress,
+    functionName: "balanceOf",
+    args: [address]
+  });
+}
+
 function riskSnapshotFromChain(snapshot: Snapshot, apr: bigint | null): RiskSnapshot {
   return {
     healthFactorWad: snapshot.position.healthFactor,
@@ -121,9 +267,9 @@ function riskSnapshotFromChain(snapshot: Snapshot, apr: bigint | null): RiskSnap
   };
 }
 
-function buildRunway(config: Config, escrowBalanceUsdc: bigint, perTickCostUsdc: bigint): ComputeRunway {
+function buildRunway(config: Config, creditBalanceUsdc: bigint, perTickCostUsdc: bigint): ComputeRunway {
   return computeRunway({
-    escrowBalanceUsdc,
+    escrowBalanceUsdc: creditBalanceUsdc,
     perTickCostUsdc,
     baseIntervalSeconds: config.runIntervalSeconds,
     nominalDays: config.runwayNominalDays,
@@ -132,7 +278,14 @@ function buildRunway(config: Config, escrowBalanceUsdc: bigint, perTickCostUsdc:
   });
 }
 
-function planPayEscrowAction(config: Config, snapshot: Snapshot, amountUsdc: bigint, reason: string): PlannedAction {
+function planPayEscrowAction(
+  config: Config,
+  billingProvider: ComputeBillingProvider,
+  snapshot: Snapshot,
+  amountUsdc: bigint,
+  reason: string
+): PlannedAction {
+  const transferSpec = billingProvider.transferSpec("routine");
   const transferAmount = minBigInt(amountUsdc, snapshot.balances.usdc);
 
   if (transferAmount <= 0n) {
@@ -141,16 +294,44 @@ function planPayEscrowAction(config: Config, snapshot: Snapshot, amountUsdc: big
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
-      summary: "No idle USDC available for escrow payment"
+      topupAmountUsdc: 0n,
+      topupReason: reason,
+      summary: `No idle USDC available for ${transferSpec.recipientLabel} payment`
     };
   }
 
   return {
-    decision: "pay-escrow",
-    calls: [callTransfer(config.usdcAddress, config.escrowAddress, transferAmount)],
+    decision: transferSpec.decision,
+    calls: [billingProvider.buildTopupTransferCall(config, transferAmount)],
     swapCostUsd: 0n,
     escrowPaymentUsdc: transferAmount,
-    summary: `${reason}: pay ${formatToken(transferAmount, config.expectedDecimals.usdc)} USDC to escrow`
+    topupAmountUsdc: 0n,
+    topupReason: reason,
+    summary: `${reason}: pay ${formatToken(transferAmount, config.expectedDecimals.usdc)} USDC to ${transferSpec.recipientLabel}`
+  };
+}
+
+function planConwayTopupAction(config: Config, amountUsdc: bigint, reason: string): PlannedAction {
+  if (amountUsdc <= 0n) {
+    return {
+      decision: "none",
+      calls: [],
+      swapCostUsd: 0n,
+      escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: reason,
+      summary: `${reason}: no Conway credit topup required`
+    };
+  }
+
+  return {
+    decision: "topup-credits",
+    calls: [],
+    swapCostUsd: 0n,
+    escrowPaymentUsdc: 0n,
+    topupAmountUsdc: amountUsdc,
+    topupReason: reason,
+    summary: `${reason}: top up Conway credits by ${formatToken(amountUsdc, config.expectedDecimals.usdc)} USDC`
   };
 }
 
@@ -168,6 +349,8 @@ async function planDeleverAction(config: Config, snapshot: Snapshot, account: `0
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: "HF below target but debt already near target envelope",
       summary: "HF below target but debt already near target envelope"
     };
   }
@@ -181,6 +364,8 @@ async function planDeleverAction(config: Config, snapshot: Snapshot, account: `0
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: "Repay amount rounded to zero",
       summary: "Repay amount rounded to zero"
     };
   }
@@ -243,6 +428,8 @@ async function planDeleverAction(config: Config, snapshot: Snapshot, account: `0
     calls,
     swapCostUsd,
     escrowPaymentUsdc: 0n,
+    topupAmountUsdc: 0n,
+    topupReason: "delever",
     summary: `Delever: repay ${formatToken(repayWeth, WETH_DECIMALS)} WETH to restore HF>=target`
   };
 }
@@ -263,6 +450,8 @@ async function planLoopAction(config: Config, snapshot: Snapshot, account: `0x${
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: "No debt capacity available under HF guard",
       summary: "No debt capacity available under HF guard"
     };
   }
@@ -276,6 +465,8 @@ async function planLoopAction(config: Config, snapshot: Snapshot, account: `0x${
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: "Borrow amount rounded to zero",
       summary: "Borrow amount rounded to zero"
     };
   }
@@ -334,6 +525,8 @@ async function planLoopAction(config: Config, snapshot: Snapshot, account: `0x${
     calls,
     swapCostUsd,
     escrowPaymentUsdc: 0n,
+    topupAmountUsdc: 0n,
+    topupReason: "loop",
     summary: `Loop: borrow ${formatToken(quote.sellAmount, WETH_DECIMALS)} WETH, swap to wstETH and resupply`
   };
 }
@@ -347,17 +540,21 @@ type FundEscrowPlanInput = {
 
 async function planFundEscrowAction(
   config: Config,
+  billingProvider: ComputeBillingProvider,
   snapshot: Snapshot,
   account: `0x${string}`,
   input: FundEscrowPlanInput
 ): Promise<PlannedAction> {
+  const harvestTransferSpec = billingProvider.transferSpec("harvest");
   if (input.targetUsdc <= 0n) {
     return {
       decision: "none",
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
-      summary: `${input.reason}: no escrow deficit to fund`
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
+      summary: `${input.reason}: no ${harvestTransferSpec.recipientLabel} deficit to fund`
     };
   }
 
@@ -383,7 +580,7 @@ async function planFundEscrowAction(
   const remainingUsdcNeeded = safeSub(input.targetUsdc, idleUsdc);
 
   if (!input.harvestMaxSafe && remainingUsdcNeeded <= 0n) {
-    return planPayEscrowAction(config, snapshot, input.targetUsdc, input.reason);
+    return planPayEscrowAction(config, billingProvider, snapshot, input.targetUsdc, input.reason);
   }
 
   if (maxSellWstEth <= 0n) {
@@ -392,6 +589,8 @@ async function planFundEscrowAction(
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
       summary: `${input.reason}: no safe harvest capacity without violating HF guard`
     };
   }
@@ -428,6 +627,8 @@ async function planFundEscrowAction(
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
       summary: `${input.reason}: quote returned zero amount`
     };
   }
@@ -439,6 +640,8 @@ async function planFundEscrowAction(
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
       summary: `${input.reason}: required withdraw exceeds HF-safe collateral withdraw limit`
     };
   }
@@ -467,11 +670,13 @@ async function planFundEscrowAction(
       calls: [],
       swapCostUsd: 0n,
       escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
       summary: `${input.reason}: no USDC available to transfer after harvest`
     };
   }
 
-  calls.push(callTransfer(config.usdcAddress, config.escrowAddress, transferAmount));
+  calls.push(billingProvider.buildTopupTransferCall(config, transferAmount));
 
   const swapCostUsd = computeSwapCostUsd(
     quote.sellAmount,
@@ -483,16 +688,19 @@ async function planFundEscrowAction(
   );
 
   return {
-    decision: "fund-escrow",
+    decision: harvestTransferSpec.decision,
     calls,
     swapCostUsd,
     escrowPaymentUsdc: transferAmount,
-    summary: `${input.reason}: harvest ${formatToken(quote.sellAmount, WSTETH_DECIMALS)} wstETH and fund escrow ${formatToken(transferAmount, config.expectedDecimals.usdc)} USDC`
+    topupAmountUsdc: 0n,
+    topupReason: input.reason,
+    summary: `${input.reason}: harvest ${formatToken(quote.sellAmount, WSTETH_DECIMALS)} wstETH and fund ${harvestTransferSpec.recipientLabel} ${formatToken(transferAmount, config.expectedDecimals.usdc)} USDC`
   };
 }
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const billingProvider = createComputeBillingProvider(config);
   const chain = createChainContext(config);
 
   await validateStartup(config, chain);
@@ -507,13 +715,28 @@ async function main(): Promise<void> {
 
   const bundler = createBundlerContext(chain.chain, config.bundlerRpcUrl, config.entryPointAddress);
   const paymaster = createOptionalPaymasterClient(config.paymasterRpcUrl, chain.chain);
+  const circlePaymaster: CirclePaymasterConfig = {
+    enabled: config.useCirclePaymaster,
+    paymasterAddress: config.circlePaymasterAddress,
+    usdcAddress: config.usdcAddress
+  };
   const builderSuffix = buildDataSuffix(config.builderCode);
 
   const riskEngine: MonteCarloRiskEngine = createRiskEngineFromEnv();
 
-  console.log(`[startup] chainId=${config.chainId} dryRun=${config.dryRun}`);
+  console.log(
+    `[startup] chainId=${config.chainId} dryRun=${config.dryRun} billingMode=${billingProvider.mode}`
+  );
   console.log(`[startup] smartAccount=${smartAccount.address}`);
   console.log(`[startup] entryPoint=${config.entryPointAddress}`);
+  if (circlePaymaster.enabled) {
+    console.log(`[startup] circlePaymaster=${circlePaymaster.paymasterAddress} (gas paid in USDC)`);
+  }
+  if (billingProvider.mode === "conway") {
+    console.log(
+      `[startup] conwayPayer=${config.conwayPayerAddress ?? "unconfigured"} creditsFloor=${formatToken(config.conwayCreditsMinBalanceUsdc, config.expectedDecimals.usdc)} payerFloor=${formatToken(config.conwayPayerMinBalanceUsdc, config.expectedDecimals.usdc)}`
+    );
+  }
 
   let nextIntervalMultiplier = 1;
 
@@ -550,8 +773,13 @@ async function main(): Promise<void> {
       });
       const perTickCostUsd = usdcToUsd(perTickCostUsdc, initialSnapshot.prices.usdcUsd, config.expectedDecimals.usdc);
 
-      const initialRunway = buildRunway(config, initialSnapshot.escrowUsdc, perTickCostUsdc);
+      const initialRunwayStatus = await billingProvider.readRunwayBalanceUsdc(initialSnapshot);
+      const initialRunway = buildRunway(config, initialRunwayStatus.creditBalanceUsdc, perTickCostUsdc);
       nextIntervalMultiplier = adaptiveIntervalMultiplier(initialRunway.urgency);
+      const conwayMode = billingProvider.mode === "conway";
+      const initialPayerBalanceUsdc = conwayMode
+        ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
+        : null;
 
       const baselineEconomics = computeEconomics({
         timestamp: runTimestamp,
@@ -569,10 +797,27 @@ async function main(): Promise<void> {
       const profitable = baselineEconomics.netDeltaUsd > 0n;
       const consecutiveLoops = computeConsecutiveLoopRuns(runs);
       const loopCap = effectiveMaxLoops(config.maxLoops, initialRunway.urgency);
+      const nowMs = parseTimestampMs(runTimestamp) ?? Date.now();
+      const payerFundingWindowStartMs = nowMs - 24 * 60 * 60 * 1000;
+      const payerFundingUsedLast24hUsdc = conwayMode
+        ? sumHistoricalPayerFundingUsdc(runs, payerFundingWindowStartMs, nowMs)
+        : 0n;
+      const payerFundingRemainingDailyUsdc = conwayMode
+        ? safeSub(config.conwayPayerFundMaxUsdcPerDay, payerFundingUsedLast24hUsdc)
+        : 0n;
+      const payerFundingCooldownActive = conwayMode
+        ? cooldownActive(nowMs, findLastSuccessfulPayerFundingMs(runs), config.conwayPayerFundCooldownSeconds)
+        : false;
+      const creditTopupCooldownActive = conwayMode
+        ? cooldownActive(nowMs, findLastSuccessfulTopupMs(runs), config.conwayCreditsTopupCooldownSeconds)
+        : false;
 
       const hfBelowTarget = initialSnapshot.position.healthFactor < config.hfTargetWad;
       const deficitToNominalUsdc = escrowDeficitUsdc(initialRunway, config.runwayNominalDays);
       const deficitToElevatedUsdc = escrowDeficitUsdc(initialRunway, config.runwayElevatedDays);
+      const creditsTargetDeficitUsdc = conwayMode
+        ? safeSub(config.conwayCreditsTargetBalanceUsdc, initialRunwayStatus.creditBalanceUsdc)
+        : 0n;
 
       const equityUsd = safeSub(initialSnapshot.position.totalCollateralBase, initialSnapshot.position.totalDebtBase);
       const maxHarvestUsdcFromEquity = usdToToken(
@@ -586,22 +831,145 @@ async function main(): Promise<void> {
         calls: [],
         swapCostUsd: 0n,
         escrowPaymentUsdc: 0n,
+        topupAmountUsdc: 0n,
+        topupReason: "No action",
         summary: "No action"
       };
+      const routineTransferSpec = billingProvider.transferSpec("routine");
 
       if (hfBelowTarget) {
         planned = await planDeleverAction(config, initialSnapshot, smartAccount.address);
+      } else if (conwayMode) {
+        const payerBalanceUsdc = initialPayerBalanceUsdc ?? 0n;
+        const payerLowFloor = payerBalanceUsdc < config.conwayPayerMinBalanceUsdc;
+        const payerBelowTarget = payerBalanceUsdc < config.conwayPayerTargetBalanceUsdc;
+        const creditsLowFloor = initialRunwayStatus.creditBalanceUsdc < config.conwayCreditsMinBalanceUsdc;
+
+        const payerFundingTargetUsdc = clampByBudget(
+          safeSub(config.conwayPayerTargetBalanceUsdc, payerBalanceUsdc),
+          config.conwayPayerFundMaxUsdcPerTick,
+          payerFundingRemainingDailyUsdc
+        );
+
+        const desiredCreditsTopupUsdc = maxBigInt(
+          creditsTargetDeficitUsdc,
+          initialRunway.urgency === "critical"
+            ? deficitToElevatedUsdc
+            : initialRunway.urgency === "dead" || initialRunway.urgency === "elevated"
+              ? deficitToNominalUsdc
+              : 0n
+        );
+        const maxTopupByPayerBalanceUsdc = safeSub(payerBalanceUsdc, config.conwayPayerMinBalanceUsdc);
+        const cappedCreditsTopupUsdc = minBigInt(
+          desiredCreditsTopupUsdc,
+          minBigInt(config.conwayCreditsTopupMaxUsdcPerTick, maxTopupByPayerBalanceUsdc)
+        );
+
+        if ((initialRunway.urgency === "critical" || initialRunway.urgency === "dead") && payerLowFloor && creditsLowFloor) {
+          if (payerFundingCooldownActive) {
+            planned = {
+              ...planned,
+              summary: "Compute emergency: payer wallet low and credits low, but payer funding cooldown is active"
+            };
+          } else if (payerFundingTargetUsdc <= 0n) {
+            planned = {
+              ...planned,
+              summary:
+                "Compute emergency: payer wallet low and credits low, but payer funding budget cap is exhausted for this window"
+            };
+          } else {
+            planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
+              targetUsdc: payerFundingTargetUsdc,
+              reason: "Compute emergency (credits + payer low)",
+              capByEquityBps: true,
+              harvestMaxSafe: initialRunway.urgency === "dead"
+            });
+          }
+        } else if (payerLowFloor) {
+          if (payerFundingCooldownActive) {
+            planned = {
+              ...planned,
+              summary: "Payer wallet below floor, but payer funding cooldown is active"
+            };
+          } else if (payerFundingTargetUsdc <= 0n) {
+            planned = {
+              ...planned,
+              summary: "Payer wallet below floor, but payer funding budget cap is exhausted"
+            };
+          } else if (
+            initialRunway.urgency === "critical" ||
+            initialRunway.urgency === "dead" ||
+            initialSnapshot.balances.usdc < payerFundingTargetUsdc
+          ) {
+            planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
+              targetUsdc: payerFundingTargetUsdc,
+              reason: "Fund Conway payer runway",
+              capByEquityBps: initialRunway.urgency !== "nominal",
+              harvestMaxSafe: initialRunway.urgency === "dead"
+            });
+          } else {
+            planned = planPayEscrowAction(
+              config,
+              billingProvider,
+              initialSnapshot,
+              payerFundingTargetUsdc,
+              "Fund Conway payer runway"
+            );
+          }
+        } else if (
+          (creditsLowFloor || initialRunway.urgency === "critical" || initialRunway.urgency === "dead" || initialRunway.urgency === "elevated") &&
+          desiredCreditsTopupUsdc > 0n
+        ) {
+          if (creditTopupCooldownActive) {
+            planned = {
+              ...planned,
+              summary: "Conway credits below target runway, but topup cooldown is active"
+            };
+          } else if (cappedCreditsTopupUsdc > 0n) {
+            planned = planConwayTopupAction(config, cappedCreditsTopupUsdc, "Top up Conway credits runway");
+          } else if (!payerFundingCooldownActive && payerBelowTarget && payerFundingTargetUsdc > 0n) {
+            planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
+              targetUsdc: payerFundingTargetUsdc,
+              reason: "Prepare Conway payer wallet for credit topups",
+              capByEquityBps: initialRunway.urgency !== "nominal",
+              harvestMaxSafe: initialRunway.urgency === "dead"
+            });
+          } else {
+            planned = {
+              ...planned,
+              summary: "Conway credits below target runway, but payer wallet does not have topup budget above floor"
+            };
+          }
+        } else if (initialRunway.urgency === "nominal" && profitable && consecutiveLoops < loopCap && canRiskGate) {
+          planned = await planLoopAction(config, initialSnapshot, smartAccount.address);
+        } else if (initialRunway.urgency === "elevated" && profitable && consecutiveLoops < loopCap && canRiskGate) {
+          planned = await planLoopAction(config, initialSnapshot, smartAccount.address);
+        } else if (
+          initialRunway.urgency === "nominal" &&
+          payerBelowTarget &&
+          !payerFundingCooldownActive &&
+          payerFundingTargetUsdc > 0n &&
+          lastRun?.decision !== routineTransferSpec.decision
+        ) {
+          planned = planPayEscrowAction(
+            config,
+            billingProvider,
+            initialSnapshot,
+            payerFundingTargetUsdc,
+            "Routine Conway payer refill from idle USDC"
+          );
+        }
       } else if (initialRunway.urgency === "critical" || initialRunway.urgency === "dead") {
         if (initialRunway.urgency === "critical") {
           const criticalTarget = minBigInt(deficitToElevatedUsdc, maxHarvestUsdcFromEquity);
-          planned = await planFundEscrowAction(config, initialSnapshot, smartAccount.address, {
+          planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
             targetUsdc: criticalTarget,
             reason: "Compute emergency (critical runway)",
             capByEquityBps: true,
             harvestMaxSafe: false
           });
         } else {
-          planned = await planFundEscrowAction(config, initialSnapshot, smartAccount.address, {
+          planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
             targetUsdc: maxHarvestUsdcFromEquity,
             reason: "Compute emergency (dead runway)",
             capByEquityBps: true,
@@ -611,7 +979,7 @@ async function main(): Promise<void> {
       } else if (initialRunway.urgency === "nominal" && profitable && consecutiveLoops < loopCap && canRiskGate) {
         planned = await planLoopAction(config, initialSnapshot, smartAccount.address);
       } else if (initialRunway.urgency === "elevated" && deficitToNominalUsdc > 0n) {
-        planned = await planFundEscrowAction(config, initialSnapshot, smartAccount.address, {
+        planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
           targetUsdc: deficitToNominalUsdc,
           reason: "Maintenance top-up (elevated runway)",
           capByEquityBps: false,
@@ -622,10 +990,11 @@ async function main(): Promise<void> {
       } else if (
         initialRunway.urgency === "nominal" &&
         initialSnapshot.balances.usdc > 0n &&
-        lastRun?.decision !== "pay-escrow"
+        lastRun?.decision !== routineTransferSpec.decision
       ) {
         planned = planPayEscrowAction(
           config,
+          billingProvider,
           initialSnapshot,
           initialSnapshot.balances.usdc,
           "Routine payment from idle USDC"
@@ -639,6 +1008,15 @@ async function main(): Promise<void> {
         account: smartAccount.address,
         decision: planned.decision,
         dryRun: config.dryRun,
+        creditBalanceUsdc: initialRunwayStatus.creditBalanceUsdc,
+        fundingSource: initialRunwayStatus.fundingSource,
+        topupStatus: "not-attempted",
+        topupAmountUsdc: 0n,
+        payerAddress: config.conwayPayerAddress,
+        payerBalanceUsdc: initialPayerBalanceUsdc ?? undefined,
+        payerFundingUsdc: 0n,
+        computeBurnUsdc: perTickCostUsdc,
+        fallbackWarning: initialRunwayStatus.fallbackWarning,
         status: "skipped",
         position: initialSnapshot.position,
         balances: initialSnapshot.balances,
@@ -654,9 +1032,25 @@ async function main(): Promise<void> {
         provenance: buildRuntimeProvenance()
       };
 
-      if (planned.decision === "none" || planned.calls.length === 0) {
+      if (planned.decision === "none") {
         runRecord.status = "skipped";
         runRecord.reason = planned.summary;
+        if (conwayMode && initialPayerBalanceUsdc !== null) {
+          runRecord.reconciliation = buildConwayReconciliationSnapshot({
+            runs,
+            windowHours: config.conwayReconciliationWindowHours,
+            nowIso: runTimestamp,
+            payerEndBalanceUsdc: initialPayerBalanceUsdc,
+            currentTopupUsdc: 0n,
+            currentFundingUsdc: 0n,
+            bootstrapUsdc: config.conwayReconciliationBootstrapUsdc
+          });
+          if (!runRecord.reconciliation.withinInvariant) {
+            console.warn(
+              `[billing] reconciliation invariant breached lhs=${formatToken(runRecord.reconciliation.lhsUsdc, config.expectedDecimals.usdc)} rhs=${formatToken(runRecord.reconciliation.rhsUsdc, config.expectedDecimals.usdc)}`
+            );
+          }
+        }
         await appendRunRecord(config.runLogPath, runRecord);
         pushTelemetry("run", runRecord);
         console.log(
@@ -665,35 +1059,176 @@ async function main(): Promise<void> {
         return;
       }
 
-      const rawCallData = await smartAccount.encodeCalls(planned.calls);
+      if (planned.decision === "topup-credits") {
+        let topupStatus: AgentRunRecord["topupStatus"] = "not-attempted";
+        let topupAmountUsdc = planned.topupAmountUsdc;
+        let runStatus: AgentRunRecord["status"] = "skipped";
+        let runReason = planned.summary;
+
+        if (config.dryRun) {
+          topupStatus = "skipped";
+          runStatus = "skipped";
+          runReason = `Dry run: ${planned.summary}`;
+        } else if (!billingProvider.topUpCredits) {
+          topupStatus = "error";
+          runStatus = "error";
+          runReason = "Billing provider does not support Conway credit topups";
+        } else {
+          const topupResult = await billingProvider.topUpCredits(planned.topupAmountUsdc, planned.topupReason);
+          topupStatus = topupResult.status;
+          topupAmountUsdc = topupResult.amountUsdc;
+          runStatus = topupResult.status === "ok" ? "ok" : topupResult.status === "skipped" ? "skipped" : "error";
+          runReason = topupResult.summary;
+        }
+
+        const finalRunwayStatus = await billingProvider.readRunwayBalanceUsdc(initialSnapshot);
+        const finalRunway = buildRunway(config, finalRunwayStatus.creditBalanceUsdc, perTickCostUsdc);
+        nextIntervalMultiplier = adaptiveIntervalMultiplier(finalRunway.urgency);
+
+        const finalEconomics = computeEconomics({
+          timestamp: runTimestamp,
+          previousTimestamp: lastRun?.timestamp,
+          collateralBaseUsd: initialSnapshot.position.totalCollateralBase,
+          debtBaseUsd: initialSnapshot.position.totalDebtBase,
+          borrowRateRay: initialSnapshot.reserve.currentVariableBorrowRateRay,
+          wstEthAprWad: apr,
+          gasCostUsd: 0n,
+          swapCostUsd: 0n,
+          computeCostUsd: perTickCostUsd
+        });
+        const finalPayerBalanceUsdc = conwayMode
+          ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
+          : null;
+        const currentTopupUsdc = topupStatus === "ok" ? topupAmountUsdc : 0n;
+
+        runRecord = {
+          ...runRecord,
+          topupStatus,
+          topupAmountUsdc,
+          payerBalanceUsdc: finalPayerBalanceUsdc ?? runRecord.payerBalanceUsdc,
+          payerFundingUsdc: 0n,
+          computeBurnUsdc: perTickCostUsdc,
+          status: runStatus,
+          reason: runReason,
+          runway: finalRunway,
+          economics: finalEconomics,
+          creditBalanceUsdc: finalRunwayStatus.creditBalanceUsdc,
+          fundingSource: finalRunwayStatus.fundingSource,
+          fallbackWarning: finalRunwayStatus.fallbackWarning
+        };
+        if (conwayMode && finalPayerBalanceUsdc !== null) {
+          runRecord.reconciliation = buildConwayReconciliationSnapshot({
+            runs,
+            windowHours: config.conwayReconciliationWindowHours,
+            nowIso: runTimestamp,
+            payerEndBalanceUsdc: finalPayerBalanceUsdc,
+            currentTopupUsdc,
+            currentFundingUsdc: 0n,
+            bootstrapUsdc: config.conwayReconciliationBootstrapUsdc
+          });
+          if (!runRecord.reconciliation.withinInvariant) {
+            console.warn(
+              `[billing] reconciliation invariant breached lhs=${formatToken(runRecord.reconciliation.lhsUsdc, config.expectedDecimals.usdc)} rhs=${formatToken(runRecord.reconciliation.rhsUsdc, config.expectedDecimals.usdc)}`
+            );
+          }
+        }
+
+        await appendRunRecord(config.runLogPath, runRecord);
+        pushTelemetry("run", runRecord);
+        console.log(
+          `[run] ${runRecord.status} decision=${planned.decision} topupStatus=${runRecord.topupStatus} topupAmount=${formatToken(runRecord.topupAmountUsdc, config.expectedDecimals.usdc)} runway=${toRunwayDaysString(finalRunway)}d urgency=${finalRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s`
+        );
+        return;
+      }
+
+      if (planned.calls.length === 0) {
+        runRecord.status = "skipped";
+        runRecord.reason = planned.summary;
+        if (conwayMode && initialPayerBalanceUsdc !== null) {
+          runRecord.reconciliation = buildConwayReconciliationSnapshot({
+            runs,
+            windowHours: config.conwayReconciliationWindowHours,
+            nowIso: runTimestamp,
+            payerEndBalanceUsdc: initialPayerBalanceUsdc,
+            currentTopupUsdc: 0n,
+            currentFundingUsdc: 0n,
+            bootstrapUsdc: config.conwayReconciliationBootstrapUsdc
+          });
+          if (!runRecord.reconciliation.withinInvariant) {
+            console.warn(
+              `[billing] reconciliation invariant breached lhs=${formatToken(runRecord.reconciliation.lhsUsdc, config.expectedDecimals.usdc)} rhs=${formatToken(runRecord.reconciliation.rhsUsdc, config.expectedDecimals.usdc)}`
+            );
+          }
+        }
+        await appendRunRecord(config.runLogPath, runRecord);
+        pushTelemetry("run", runRecord);
+        console.log(
+          `[run] skipped: ${planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
+        );
+        return;
+      }
+
+      // When Circle Paymaster is enabled, prepend a USDC approval so the
+      // paymaster can pull USDC for gas. We use a generous approval amount
+      // (1 USDC = 1e6) which covers typical L2 gas costs with margin.
+      const CIRCLE_PAYMASTER_APPROVAL_USDC = 1_000_000n; // 1 USDC
+      const executionCalls = circlePaymaster.enabled
+        ? [buildCirclePaymasterApproval(circlePaymaster, CIRCLE_PAYMASTER_APPROVAL_USDC), ...planned.calls]
+        : planned.calls;
+
+      const rawCallData = await smartAccount.encodeCalls(executionCalls);
       const callDataWithSuffix = applySuffix(rawCallData, builderSuffix);
 
       if (!callDataHasSuffix(callDataWithSuffix, builderSuffix)) {
         throw new Error("Builder code suffix was not appended to userOp callData");
       }
 
+      const usdcBalanceBefore = circlePaymaster.enabled ? initialSnapshot.balances.usdc : null;
+
       const result = await sendUserOperation(
         bundler,
         smartAccount,
-        planned.calls,
+        executionCalls,
         callDataWithSuffix,
         builderSuffix,
         config.dryRun,
-        paymaster
+        paymaster,
+        circlePaymaster
       );
 
       let gasCostUsd = 0n;
+      let gasPaymentUsdc: bigint | null = null;
       let liveSnapshot = initialSnapshot;
 
       if (!config.dryRun && result.txHash) {
         const receipt = await chain.publicClient.getTransactionReceipt({ hash: result.txHash });
-        const gasCostWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
-        gasCostUsd = computeGasCostUsd(gasCostWei, initialSnapshot.prices.wethUsd);
-        liveSnapshot = await readChainSnapshot(chain.publicClient, config, smartAccount.address);
+
+        if (result.circlePaymasterUsed) {
+          // Gas was paid in USDC — read the post-tx USDC balance to compute cost
+          liveSnapshot = await readChainSnapshot(chain.publicClient, config, smartAccount.address);
+          const usdcBalanceAfter = liveSnapshot.balances.usdc;
+          // The difference in USDC balance attributable to gas (exclude escrow payments from planned calls)
+          const totalUsdcDelta = (usdcBalanceBefore ?? 0n) - usdcBalanceAfter;
+          gasPaymentUsdc = totalUsdcDelta > planned.escrowPaymentUsdc
+            ? totalUsdcDelta - planned.escrowPaymentUsdc
+            : 0n;
+          // Convert USDC gas payment to USD (8-decimal) for economics tracking
+          gasCostUsd = usdcToUsd(gasPaymentUsdc, initialSnapshot.prices.usdcUsd, config.expectedDecimals.usdc);
+        } else {
+          // Gas was paid in ETH — standard path
+          const gasCostWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
+          gasCostUsd = computeGasCostUsd(gasCostWei, initialSnapshot.prices.wethUsd);
+          liveSnapshot = await readChainSnapshot(chain.publicClient, config, smartAccount.address);
+        }
       }
 
-      const finalRunway = buildRunway(config, liveSnapshot.escrowUsdc, perTickCostUsdc);
+      const finalRunwayStatus = await billingProvider.readRunwayBalanceUsdc(liveSnapshot);
+      const finalRunway = buildRunway(config, finalRunwayStatus.creditBalanceUsdc, perTickCostUsdc);
       nextIntervalMultiplier = adaptiveIntervalMultiplier(finalRunway.urgency);
+      const finalPayerBalanceUsdc = conwayMode
+        ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
+        : null;
+      const settledPayerFundingUsdc = conwayMode && !config.dryRun && result.success ? planned.escrowPaymentUsdc : 0n;
 
       const finalEconomics = computeEconomics({
         timestamp: runTimestamp,
@@ -707,6 +1242,11 @@ async function main(): Promise<void> {
         computeCostUsd: perTickCostUsd
       });
 
+      // Record USDC gas payment in economics when Circle Paymaster was used
+      if (gasPaymentUsdc !== null) {
+        finalEconomics.gasPaymentUsdc = gasPaymentUsdc;
+      }
+
       runRecord = {
         ...runRecord,
         position: liveSnapshot.position,
@@ -719,8 +1259,30 @@ async function main(): Promise<void> {
         economics: finalEconomics,
         runway: finalRunway,
         status: result.success ? "ok" : "error",
-        reason: planned.summary
+        reason: planned.summary,
+        creditBalanceUsdc: finalRunwayStatus.creditBalanceUsdc,
+        fundingSource: finalRunwayStatus.fundingSource,
+        payerBalanceUsdc: finalPayerBalanceUsdc ?? runRecord.payerBalanceUsdc,
+        payerFundingUsdc: settledPayerFundingUsdc,
+        computeBurnUsdc: perTickCostUsdc,
+        fallbackWarning: finalRunwayStatus.fallbackWarning
       };
+      if (conwayMode && finalPayerBalanceUsdc !== null) {
+        runRecord.reconciliation = buildConwayReconciliationSnapshot({
+          runs,
+          windowHours: config.conwayReconciliationWindowHours,
+          nowIso: runTimestamp,
+          payerEndBalanceUsdc: finalPayerBalanceUsdc,
+          currentTopupUsdc: 0n,
+          currentFundingUsdc: settledPayerFundingUsdc,
+          bootstrapUsdc: config.conwayReconciliationBootstrapUsdc
+        });
+        if (!runRecord.reconciliation.withinInvariant) {
+          console.warn(
+            `[billing] reconciliation invariant breached lhs=${formatToken(runRecord.reconciliation.lhsUsdc, config.expectedDecimals.usdc)} rhs=${formatToken(runRecord.reconciliation.rhsUsdc, config.expectedDecimals.usdc)}`
+          );
+        }
+      }
 
       if (result.userOpHash && result.txHash && result.blockNumber) {
         runRecord.userOp = {
@@ -741,8 +1303,11 @@ async function main(): Promise<void> {
       pushTelemetry("run", runRecord);
 
       const aprLabel = apr ? toWadPercentString(apr) : "n/a";
+      const gasLabel = gasPaymentUsdc !== null
+        ? `gasUsdc=${formatToken(gasPaymentUsdc, config.expectedDecimals.usdc)}`
+        : `gasUsd=${formatToken(gasCostUsd, 8)}`;
       console.log(
-        `[run] ${runRecord.status} decision=${planned.decision} hf=${toHfString(liveSnapshot.position.healthFactor)} apr=${aprLabel} net=${formatToken(finalEconomics.netDeltaUsd, 8)} usd runway=${toRunwayDaysString(finalRunway)}d urgency=${finalRunway.urgency} escrowPaid=${formatToken(planned.escrowPaymentUsdc, config.expectedDecimals.usdc)} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s`
+        `[run] ${runRecord.status} decision=${planned.decision} hf=${toHfString(liveSnapshot.position.healthFactor)} apr=${aprLabel} net=${formatToken(finalEconomics.netDeltaUsd, 8)} usd ${gasLabel} runway=${toRunwayDaysString(finalRunway)}d urgency=${finalRunway.urgency} billingTransfer=${formatToken(planned.escrowPaymentUsdc, config.expectedDecimals.usdc)} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s`
       );
 
       if (runRecord.userOp) {
@@ -758,13 +1323,17 @@ main().catch(async (error) => {
 
   try {
     const config = loadConfig();
-      const fallbackRecord: AgentRunRecord = {
-        timestamp: nowIso(),
+    const fallbackRecord: AgentRunRecord = {
+      timestamp: nowIso(),
       mode: config.dryRun ? "dry-run" : "live",
       chainId: config.chainId,
       account: "0x0000000000000000000000000000000000000000",
       decision: "none",
       dryRun: config.dryRun,
+      creditBalanceUsdc: 0n,
+      fundingSource: "escrow",
+      topupStatus: "not-attempted",
+      topupAmountUsdc: 0n,
       status: "error",
       reason: message,
       position: {
@@ -786,7 +1355,7 @@ main().catch(async (error) => {
         wstEthPerToken: 0n,
         wstEthAprWad: null
       },
-        economics: {
+      economics: {
         intervalSeconds: 0n,
         yieldDeltaUsd: 0n,
         interestDeltaUsd: 0n,
@@ -796,14 +1365,15 @@ main().catch(async (error) => {
         netDeltaUsd: 0n,
         breakEvenEquityUsdApprox: null,
         leverageWad: 0n,
+        gasPaymentUsdc: null,
         notes: ["fatal startup/runtime error"]
       },
-        risk: {
-          status: "unavailable",
-          notes: "risk engine unavailable; policy fallback uses HF-only guardrails"
-        },
-        provenance: buildRuntimeProvenance()
-      };
+      risk: {
+        status: "unavailable",
+        notes: "risk engine unavailable; policy fallback uses HF-only guardrails"
+      },
+      provenance: buildRuntimeProvenance()
+    };
 
     await appendRunRecord(config.runLogPath, fallbackRecord);
     pushTelemetry("run", fallbackRecord);

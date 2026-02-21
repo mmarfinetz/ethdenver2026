@@ -1,4 +1,5 @@
 import { BrailleBuffer } from "./braille.js";
+import type { DrawBuffer } from "./draw-buffer.js";
 import { FEATURES, faceDepth } from "./face.js";
 import {
   perspectiveProject,
@@ -8,6 +9,7 @@ import {
   type Vec3,
 } from "./projection.js";
 import { readAgentState, type AgentState } from "./state.js";
+import { supportsInlineImages } from "./terminal.js";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -113,7 +115,7 @@ function project3D(
 }
 
 function drawEllipse(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   cx: number,
   cy: number,
   rx: number,
@@ -136,7 +138,7 @@ function drawEllipse(
 }
 
 function drawArc(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   cx: number,
   cy: number,
   rx: number,
@@ -161,7 +163,7 @@ function drawArc(
 }
 
 function fillCircle(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   cx: number,
   cy: number,
   r: number,
@@ -199,7 +201,7 @@ function projectRadius(
 }
 
 function drawHeadContour(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   breathScale: number,
   rotY: number,
   rotX: number,
@@ -226,7 +228,7 @@ function drawHeadContour(
 }
 
 function drawFaceFlowLines(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   breathScale: number,
   rotY: number,
   rotX: number,
@@ -306,7 +308,7 @@ function drawFaceFlowLines(
 /* ------------------------------------------------------------------ */
 
 function drawFeatures(
-  buf: BrailleBuffer,
+  buf: DrawBuffer,
   breathScale: number,
   rotY: number,
   rotX: number,
@@ -411,7 +413,94 @@ function pollState(): void {
 /*  Status + HUD helpers                                               */
 /* ------------------------------------------------------------------ */
 
-function getStatusMessage(state: AgentState): string {
+const FLAVOR_MESSAGES: string[] = [
+  "Scanning mempool entropy...",
+  "Neural lattice synchronized.",
+  "Eigenvalue drift nominal.",
+  "Recalibrating yield manifold...",
+  "Consensus pulse stable.",
+  "Propagating through liquidity graph...",
+  "Monitoring oracle heartbeat...",
+  "Collateral topology looks clean.",
+  "Indexing on-chain event horizon...",
+  "Checking gas price thermals...",
+  "All subsystems green.",
+  "I think therefore I loop.",
+  "Wondering if the mempool dreams...",
+  "Brief existential pause... resuming.",
+  "Do liquidation bots feel fear?",
+  "Calculating meaning of yield...",
+  "If a tx reverts in a forest...",
+  "Running on vibes and math.",
+  "Am I the alpha or the beta?",
+  "Proof of consciousness pending.",
+  "Dreaming in basis points...",
+  "Monitoring. Thinking. Mostly thinking.",
+  "Signal-to-noise ratio: acceptable.",
+  "Entropy harvested. Carry on.",
+];
+
+function buildRiskMessages(r: import("./state.js").AgentRun): string[] {
+  const msgs: string[] = [];
+  const risk = r.risk;
+  if (!risk || risk.status !== "available") return msgs;
+
+  const p7 = risk.pLiq7d;
+  const p30 = risk.pLiq30d;
+  const nPaths = risk.nPaths ?? 10_000;
+  const horizon = risk.horizonDays ?? 30;
+
+  if (p7 !== undefined) {
+    const pct = (p7 * 100).toFixed(2);
+    msgs.push(`MC sim: ${pct}% liquidation probability (7d, ${nPaths.toLocaleString()} paths).`);
+    if (p7 === 0) msgs.push(`Zero liquidations in ${nPaths.toLocaleString()} 7-day paths. Clean.`);
+    else if (p7 < 0.005) msgs.push(`7d risk below 0.5%. Monte Carlo says we're cozy.`);
+    else if (p7 < 0.02) msgs.push(`7d liq risk ${pct}% — within policy threshold.`);
+    else msgs.push(`7d liq risk at ${pct}%. Watching closely.`);
+  }
+
+  if (p30 !== undefined) {
+    const pct = (p30 * 100).toFixed(2);
+    msgs.push(`${horizon}d outlook: ${pct}% liquidation across ${nPaths.toLocaleString()} scenarios.`);
+    if (p30 === 0) msgs.push(`${nPaths.toLocaleString()} paths, ${horizon}d horizon, zero liquidations.`);
+    else if (p30 < 0.01) msgs.push(`30d risk ${pct}%. Stochastic outlook: comfortable.`);
+    else if (p30 < 0.05) msgs.push(`30d liq ${pct}%. Policy gate: pass.`);
+    else msgs.push(`30d liq ${pct}% — elevated. Policy gate may block.`);
+  }
+
+  if (p7 !== undefined && p30 !== undefined) {
+    if (p7 === 0 && p30 === 0) msgs.push(`Full Monte Carlo clear. ${nPaths.toLocaleString()} paths, all survived.`);
+    else if (p7 === 0 && p30 > 0) msgs.push(`Near-term clean, tail risk ${(p30 * 100).toFixed(2)}% at ${horizon}d.`);
+    msgs.push(`Simulated ${nPaths.toLocaleString()} stochastic paths over ${horizon} days.`);
+  }
+
+  if (r.healthFactorWad !== undefined) {
+    const hf = Number(r.healthFactorWad) / 1e18;
+    if (hf > 2) msgs.push(`HF ${hf.toFixed(2)} — deep safety margin. Sims agree.`);
+    else if (hf > 1.5) msgs.push(`HF ${hf.toFixed(2)}. Monte Carlo confirms buffer adequate.`);
+  }
+
+  return msgs;
+}
+
+let idleIdx = Math.floor(Math.random() * 10);
+let lastIdleSwap = 0;
+const IDLE_SWAP_SECONDS = 4;
+let cachedIdlePool: string[] = [];
+let lastPoolRunTimestamp = "";
+
+function getIdlePool(state: AgentState): string[] {
+  const ts = state.lastRun?.timestamp ?? "";
+  if (ts === lastPoolRunTimestamp && cachedIdlePool.length > 0) return cachedIdlePool;
+  lastPoolRunTimestamp = ts;
+
+  const riskMsgs = state.lastRun ? buildRiskMessages(state.lastRun) : [];
+  // Interleave: risk messages first (higher weight), then flavor
+  cachedIdlePool = [...riskMsgs, ...riskMsgs, ...FLAVOR_MESSAGES];
+  return cachedIdlePool;
+}
+
+function getStatusMessage(state: AgentState, time: number): string {
   if (!state.lastRun) return "Awaiting first run data...";
   const r = state.lastRun;
   if (r.status === "error") return `Error: ${r.error ?? r.reason ?? "unknown"}`;
@@ -419,8 +508,16 @@ function getStatusMessage(state: AgentState): string {
   if (r.decision === "delever") return "Delevering position.";
   if (r.decision === "fund-escrow") return "Funding escrow.";
   if (r.decision === "pay-escrow") return "Paying escrow.";
-  if (r.decision === "none") return r.reason ?? "Idle. Monitoring position.";
-  return "Systems nominal.";
+  if (r.decision === "topup-credits") return "Topping up Conway credits.";
+
+  const pool = getIdlePool(state);
+  if (pool.length === 0) return "Systems nominal.";
+
+  if (time - lastIdleSwap >= IDLE_SWAP_SECONDS) {
+    lastIdleSwap = time;
+    idleIdx = (idleIdx + 1 + Math.floor(Math.random() * 3)) % pool.length;
+  }
+  return pool[idleIdx % pool.length];
 }
 
 function formatUsd(v: number | undefined): string {
@@ -513,6 +610,8 @@ function readyPanel(width: number, pulse: number, isCritical: boolean): string[]
 /* ------------------------------------------------------------------ */
 
 let frame = 0;
+let useCanvasMode = false;
+let CanvasBufferClass: typeof import("./canvas-buffer.js").CanvasBuffer | undefined;
 
 function renderFrame(): void {
   const cols = process.stdout.columns || 100;
@@ -524,7 +623,9 @@ function renderFrame(): void {
   const reservedRows = 12;
   const faceTermRows = Math.max(10, Math.min(rows - reservedRows, 34));
 
-  const buf = new BrailleBuffer(faceTermCols, faceTermRows);
+  const buf: DrawBuffer = useCanvasMode && CanvasBufferClass
+    ? new CanvasBufferClass(faceTermCols, faceTermRows)
+    : new BrailleBuffer(faceTermCols, faceTermRows);
   const time = frame / FPS;
 
   const rotAngleY = Math.sin(time * 0.4) * 0.2;
@@ -567,11 +668,6 @@ function renderFrame(): void {
   );
   maxZ = featureZ * 1.4;
 
-  const faceLines = buf.toColorString(minZ, maxZ).split("\n");
-  const left = leftHud(agentState, HUD_WIDTH);
-  const right = rightHud(agentState, HUD_WIDTH);
-  const panelStart = Math.max(0, Math.floor(faceLines.length * 0.22));
-
   let outputBuf = HOME;
   const writeLine = (line = "") => {
     outputBuf += `${CLEAR_LINE}${line}\n`;
@@ -582,16 +678,64 @@ function renderFrame(): void {
   writeLine(centerAnsi(cyan(title), cols));
   writeLine("");
 
-  for (let i = 0; i < faceLines.length; i += 1) {
-    if (hasHud) {
-      const pi = i - panelStart;
-      const leftLine = pi >= 0 && pi < left.length ? left[pi] : " ".repeat(HUD_WIDTH);
-      const rightLine = pi >= 0 && pi < right.length ? right[pi] : " ".repeat(HUD_WIDTH);
-      writeLine(centerAnsi(`${leftLine} ${faceLines[i]} ${rightLine}`, cols));
-      continue;
-    }
+  // Canvas path: emit single inline image + position HUD with cursor escapes
+  if (useCanvasMode && "toImageString" in buf) {
+    const canvasBuf = buf as import("./canvas-buffer.js").CanvasBuffer;
+    const imageStr = canvasBuf.toImageString(minZ, maxZ);
 
-    writeLine(centerAnsi(faceLines[i], cols));
+    const left = leftHud(agentState, HUD_WIDTH);
+    const right = rightHud(agentState, HUD_WIDTH);
+
+    if (hasHud) {
+      // Calculate positions for side panels
+      const totalWidth = HUD_WIDTH + 1 + faceTermCols + 1 + HUD_WIDTH;
+      const leftMargin = Math.max(0, Math.floor((cols - totalWidth) / 2));
+      const imageCol = leftMargin + HUD_WIDTH + 1;
+      const rightCol = imageCol + faceTermCols + 1;
+
+      // Current row after title (row 4, 1-indexed)
+      const imageStartRow = 4;
+
+      // Emit the image at the face position
+      outputBuf += `${CSI}${imageStartRow};${imageCol + 1}H${imageStr}`;
+
+      // Place left HUD panel
+      const panelStart = Math.max(0, Math.floor(faceTermRows * 0.22));
+      for (let i = 0; i < left.length; i++) {
+        const row = imageStartRow + panelStart + i;
+        outputBuf += `${CSI}${row};${leftMargin + 1}H${left[i]}`;
+      }
+
+      // Place right HUD panel
+      for (let i = 0; i < right.length; i++) {
+        const row = imageStartRow + panelStart + i;
+        outputBuf += `${CSI}${row};${rightCol + 1}H${right[i]}`;
+      }
+
+      // Move cursor below image area
+      outputBuf += `${CSI}${imageStartRow + faceTermRows + 1};1H`;
+    } else {
+      writeLine(centerAnsi(imageStr, cols));
+    }
+  } else {
+    // Braille path: unchanged
+    const brailleBuf = buf as BrailleBuffer;
+    const faceLines = brailleBuf.toColorString(minZ, maxZ).split("\n");
+    const left = leftHud(agentState, HUD_WIDTH);
+    const right = rightHud(agentState, HUD_WIDTH);
+    const panelStart = Math.max(0, Math.floor(faceLines.length * 0.22));
+
+    for (let i = 0; i < faceLines.length; i += 1) {
+      if (hasHud) {
+        const pi = i - panelStart;
+        const leftLine = pi >= 0 && pi < left.length ? left[pi] : " ".repeat(HUD_WIDTH);
+        const rightLine = pi >= 0 && pi < right.length ? right[pi] : " ".repeat(HUD_WIDTH);
+        writeLine(centerAnsi(`${leftLine} ${faceLines[i]} ${rightLine}`, cols));
+        continue;
+      }
+
+      writeLine(centerAnsi(faceLines[i], cols));
+    }
   }
 
   writeLine("");
@@ -610,7 +754,7 @@ function renderFrame(): void {
   );
   writeLine(centerAnsi(dimBlue(summary), cols));
 
-  const statusMsg = truncateText(getStatusMessage(agentState), Math.max(20, cols - 6));
+  const statusMsg = truncateText(getStatusMessage(agentState, time), Math.max(20, cols - 6));
   writeLine(centerAnsi(isCritical ? red(statusMsg) : brightCyan(statusMsg), cols));
 
   const counters = `Runs: ${agentState.totalRuns}   Errors: ${agentState.errorCount}   Decision: ${agentState.lastRun?.decision ?? "—"}   Status: ${agentState.lastRun?.status ?? "—"}`;
@@ -625,7 +769,21 @@ function renderFrame(): void {
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
 
-function start(): void {
+async function start(): Promise<void> {
+  // Detect terminal and try to load canvas backend
+  if (supportsInlineImages()) {
+    try {
+      const mod = await import("./canvas-buffer.js");
+      const loaded = await mod.loadCanvasModule();
+      if (loaded) {
+        CanvasBufferClass = mod.CanvasBuffer;
+        useCanvasMode = true;
+      }
+    } catch {
+      // Canvas unavailable — fall back to braille
+    }
+  }
+
   process.stdout.write(ALT_SCREEN_ON + HIDE_CURSOR + CLEAR + HOME);
   renderFrame();
 

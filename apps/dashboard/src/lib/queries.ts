@@ -7,7 +7,13 @@ import {
   wstEthAbi
 } from "@ssa/shared/abis";
 import { WAD } from "@ssa/shared/constants";
-import type { AgentRunRecord, ChampionGateStatus, ComputeUrgency } from "@ssa/shared/types";
+import type {
+  AgentRunRecord,
+  BillingFundingSource,
+  BillingTopupStatus,
+  ChampionGateStatus,
+  ComputeUrgency
+} from "@ssa/shared/types";
 import { valueToBigInt } from "@ssa/shared/utils";
 import { readFile } from "node:fs/promises";
 import type { Hex, PublicClient } from "viem";
@@ -16,9 +22,38 @@ import { isAddress, parseAbiItem } from "viem";
 import { resolveBasenameWithReverseCheck } from "./basenames";
 import { createDashboardPublicClient, getDashboardConfig } from "./viem";
 
-type ParsedRun = AgentRunRecord;
+type TrendFieldAvailability = {
+  healthFactor: boolean;
+  netCarryUsd: boolean;
+  runwayDays: boolean;
+};
 
-const DECISIONS: ParsedRun["decision"][] = ["none", "loop", "delever", "fund-escrow", "pay-escrow"];
+type RunDecision = AgentRunRecord["decision"];
+type FundingSource = BillingFundingSource;
+type TopupStatus = BillingTopupStatus;
+
+type ParsedUserOp = Omit<NonNullable<AgentRunRecord["userOp"]>, "action"> & {
+  action: RunDecision;
+};
+
+type RuntimeTelemetry = {
+  creditBalanceUsdc: bigint | null;
+  fundingSource: FundingSource | null;
+  topupStatus: TopupStatus | null;
+  topupAmountUsdc: bigint | null;
+  fallbackWarning: string | null;
+};
+
+type ParsedRun = Omit<AgentRunRecord, "decision" | "userOp"> & {
+  decision: RunDecision;
+  userOp?: ParsedUserOp;
+  runtimeTelemetry: RuntimeTelemetry;
+  trendAvailability: TrendFieldAvailability;
+};
+
+const DECISIONS: RunDecision[] = ["none", "loop", "delever", "fund-escrow", "pay-escrow", "topup-credits"];
+const FUNDING_SOURCES: FundingSource[] = ["escrow", "conway-credits", "escrow-fallback"];
+const TOPUP_STATUSES: TopupStatus[] = ["not-attempted", "ok", "skipped", "error"];
 const URGENCIES: ComputeUrgency[] = ["nominal", "elevated", "critical", "dead"];
 
 type UserOpView = {
@@ -102,8 +137,27 @@ type ChampionStateView = {
   };
 };
 
+type DashboardFreshnessView = {
+  dashboard: string;
+  autopilot: string | null;
+  latestRun: string | null;
+  champion: string | null;
+};
+
+type DashboardTrendPoint = {
+  timestamp: string;
+  value: bigint | null;
+};
+
+type DashboardTrendSeries = {
+  healthFactor: DashboardTrendPoint[];
+  netCarryUsd: DashboardTrendPoint[];
+  runwayDays: DashboardTrendPoint[];
+};
+
 export type DashboardState = {
   timestamp: string;
+  freshness: DashboardFreshnessView;
   chainId: number;
   explorerTxUrl: string;
   smartAccountAddress: Hex;
@@ -137,11 +191,19 @@ export type DashboardState = {
   netCarryEstimateUsd: bigint | null;
   lastRunStatus: string | null;
   lastRunReason: string | null;
+  fundingSource: FundingSource | null;
+  creditBalanceUsdc: bigint | null;
+  topupStatus: TopupStatus | null;
+  topupAmountUsdc: bigint | null;
+  fallbackWarning: string | null;
   riskNote: string | null;
   perTickCostUsdc: bigint | null;
   liveRunwayDaysWad: bigint | null;
   liveRunwayUrgency: ComputeUrgency | null;
+  trends: DashboardTrendSeries;
   totalEscrowPaidUsdc: bigint;
+  totalGasPaymentUsdc: bigint;
+  latestGasPaymentUsdc: bigint | null;
   escrowPayments: EscrowPaymentView[];
   recentUserOps: UserOpView[];
   provenance: RuntimeProvenanceView | null;
@@ -149,14 +211,71 @@ export type DashboardState = {
   champion: ChampionStateView;
 };
 
-function parseDecision(value: unknown): ParsedRun["decision"] {
+type RecentRunReceiptStatus = "success" | "reverted" | "unknown" | "offchain";
+
+export type RecentRunView = {
+  timestamp: string;
+  status: ParsedRun["status"];
+  decision: RunDecision;
+  summary: string;
+  userOpHash: Hex | null;
+  txHash: Hex | null;
+  blockNumber: bigint | null;
+  receiptStatus: RecentRunReceiptStatus;
+  fundingSource: FundingSource | null;
+  topupStatus: TopupStatus | null;
+  topupAmountUsdc: bigint | null;
+  fallbackWarning: string | null;
+};
+
+export type RecentRunsView = {
+  hasRuns: boolean;
+  runs: RecentRunView[];
+};
+
+function parseDecision(value: unknown): RunDecision {
   if (typeof value !== "string") return "none";
-  return DECISIONS.includes(value as ParsedRun["decision"]) ? (value as ParsedRun["decision"]) : "none";
+  return DECISIONS.includes(value as RunDecision) ? (value as RunDecision) : "none";
 }
 
 function parseUrgency(value: unknown): ComputeUrgency {
   if (typeof value !== "string") return "dead";
   return URGENCIES.includes(value as ComputeUrgency) ? (value as ComputeUrgency) : "dead";
+}
+
+function parseFundingSource(value: unknown): FundingSource | null {
+  if (typeof value !== "string") return null;
+  return FUNDING_SOURCES.includes(value as FundingSource) ? (value as FundingSource) : null;
+}
+
+function parseTopupStatus(value: unknown): TopupStatus | null {
+  if (typeof value !== "string") return null;
+  return TOPUP_STATUSES.includes(value as TopupStatus) ? (value as TopupStatus) : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+function hasBigIntLikeValue(value: unknown): boolean {
+  return typeof value === "bigint" || typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value));
+}
+
+function parseOptionalBigInt(value: unknown): bigint | null {
+  return hasBigIntLikeValue(value) ? valueToBigInt(value) : null;
+}
+
+function parseOptionalText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function firstDefined<T>(values: Array<T | null | undefined>): T | null {
+  for (const value of values) {
+    if (value != null) return value;
+  }
+  return null;
 }
 
 function urgencyFromDaysWad(
@@ -173,14 +292,73 @@ function urgencyFromDaysWad(
 
 function parseRunLine(line: string): ParsedRun {
   const payload = JSON.parse(line) as Record<string, unknown>;
-  const position = payload.position as Record<string, unknown>;
-  const balances = payload.balances as Record<string, unknown>;
-  const rates = payload.rates as Record<string, unknown>;
-  const economics = payload.economics as Record<string, unknown>;
-  const risk = payload.risk as Record<string, unknown>;
-  const runway = payload.runway as Record<string, unknown> | undefined;
-  const userOpPayload = payload.userOp as Record<string, unknown> | undefined;
-  const provenance = payload.provenance as Record<string, unknown> | undefined;
+  const position = asRecord(payload.position) ?? {};
+  const balances = asRecord(payload.balances) ?? {};
+  const rates = asRecord(payload.rates) ?? {};
+  const economics = asRecord(payload.economics) ?? {};
+  const risk = asRecord(payload.risk) ?? {};
+  const runway = asRecord(payload.runway);
+  const userOpPayload = asRecord(payload.userOp);
+  const provenance = asRecord(payload.provenance);
+  const topup = asRecord(payload.topup);
+  const billing = asRecord(payload.billing);
+  const telemetry = asRecord(payload.telemetry);
+  const runtime = asRecord(payload.runtime);
+  const trendAvailability: TrendFieldAvailability = {
+    healthFactor: hasBigIntLikeValue(position.healthFactor),
+    netCarryUsd: hasBigIntLikeValue(economics.netDeltaUsd),
+    runwayDays: hasBigIntLikeValue(runway?.runwayDaysWad)
+  };
+  const runtimeTelemetry: RuntimeTelemetry = {
+    creditBalanceUsdc: firstDefined([
+      parseOptionalBigInt(payload.creditBalanceUsdc),
+      parseOptionalBigInt(runway?.creditBalanceUsdc),
+      parseOptionalBigInt(runtime?.creditBalanceUsdc),
+      parseOptionalBigInt(telemetry?.creditBalanceUsdc),
+      parseOptionalBigInt(billing?.creditBalanceUsdc),
+      parseOptionalBigInt(topup?.creditBalanceUsdc),
+      parseOptionalBigInt(topup?.balanceUsdc)
+    ]),
+    fundingSource: firstDefined([
+      parseFundingSource(payload.fundingSource),
+      parseFundingSource(runway?.fundingSource),
+      parseFundingSource(runtime?.fundingSource),
+      parseFundingSource(telemetry?.fundingSource),
+      parseFundingSource(billing?.fundingSource),
+      parseFundingSource(topup?.fundingSource)
+    ]),
+    topupStatus: firstDefined([
+      parseTopupStatus(payload.topupStatus),
+      parseTopupStatus(runway?.topupStatus),
+      parseTopupStatus(runtime?.topupStatus),
+      parseTopupStatus(telemetry?.topupStatus),
+      parseTopupStatus(billing?.topupStatus),
+      parseTopupStatus(topup?.status),
+      parseTopupStatus(topup?.topupStatus)
+    ]),
+    topupAmountUsdc: firstDefined([
+      parseOptionalBigInt(payload.topupAmountUsdc),
+      parseOptionalBigInt(runway?.topupAmountUsdc),
+      parseOptionalBigInt(runtime?.topupAmountUsdc),
+      parseOptionalBigInt(telemetry?.topupAmountUsdc),
+      parseOptionalBigInt(billing?.topupAmountUsdc),
+      parseOptionalBigInt(topup?.amountUsdc),
+      parseOptionalBigInt(topup?.creditedUsdc)
+    ]),
+    fallbackWarning: firstDefined([
+      parseOptionalText(payload.fallbackWarning),
+      parseOptionalText(runway?.fallbackWarning),
+      parseOptionalText(runtime?.fallbackWarning),
+      parseOptionalText(telemetry?.fallbackWarning),
+      parseOptionalText(billing?.fallbackWarning),
+      parseOptionalText(topup?.fallbackWarning)
+    ])
+  };
+  const creditBalanceUsdc = runtimeTelemetry.creditBalanceUsdc ?? valueToBigInt(runway?.escrowBalanceUsdc);
+  const fundingSource = runtimeTelemetry.fundingSource ?? "escrow";
+  const topupStatus = runtimeTelemetry.topupStatus ?? "not-attempted";
+  const topupAmountUsdc = runtimeTelemetry.topupAmountUsdc ?? 0n;
+  const fallbackWarning = runtimeTelemetry.fallbackWarning ?? undefined;
 
   return {
     timestamp: String(payload.timestamp),
@@ -189,6 +367,11 @@ function parseRunLine(line: string): ParsedRun {
     account: String(payload.account) as Hex,
     decision: parseDecision(payload.decision),
     dryRun: Boolean(payload.dryRun),
+    creditBalanceUsdc,
+    fundingSource,
+    topupStatus,
+    topupAmountUsdc,
+    fallbackWarning,
     status: payload.status === "ok" || payload.status === "skipped" ? payload.status : "error",
     reason: typeof payload.reason === "string" ? payload.reason : undefined,
     position: {
@@ -221,6 +404,7 @@ function parseRunLine(line: string): ParsedRun {
       breakEvenEquityUsdApprox:
         economics.breakEvenEquityUsdApprox == null ? null : valueToBigInt(economics.breakEvenEquityUsdApprox),
       leverageWad: valueToBigInt(economics.leverageWad),
+      gasPaymentUsdc: economics.gasPaymentUsdc == null ? null : valueToBigInt(economics.gasPaymentUsdc),
       notes: Array.isArray(economics.notes) ? economics.notes.map(String) : []
     },
     runway: runway
@@ -264,13 +448,55 @@ function parseRunLine(line: string): ParsedRun {
           policyVersion: String(provenance.policyVersion ?? "unknown"),
           commitSha: String(provenance.commitSha ?? "unknown")
         }
-      : undefined
+      : undefined,
+    runtimeTelemetry,
+    trendAvailability
+  };
+}
+
+function latestIsoTimestamp(timestamps: Array<string | null | undefined>): string | null {
+  let latest: string | null = null;
+  let latestMs = -Infinity;
+
+  for (const timestamp of timestamps) {
+    if (!timestamp) continue;
+    const parsed = Date.parse(timestamp);
+    if (!Number.isFinite(parsed)) continue;
+    if (parsed > latestMs) {
+      latestMs = parsed;
+      latest = new Date(parsed).toISOString();
+    }
+  }
+
+  return latest;
+}
+
+function championFreshnessTimestamp(champion: ChampionStateView): string | null {
+  const lineageTimestamps = champion.lineage.flatMap((entry) => [entry.evaluatedAt, entry.createdAt]);
+  return latestIsoTimestamp([champion.currentChampion?.evaluatedAt, champion.currentChampion?.createdAt, ...lineageTimestamps]);
+}
+
+function buildDashboardTrends(runs: ParsedRun[]): DashboardTrendSeries {
+  const latestRuns = runs.slice(-30);
+  return {
+    healthFactor: latestRuns.map((run) => ({
+      timestamp: run.timestamp,
+      value: run.trendAvailability.healthFactor ? run.position.healthFactor : null
+    })),
+    netCarryUsd: latestRuns.map((run) => ({
+      timestamp: run.timestamp,
+      value: run.trendAvailability.netCarryUsd ? run.economics.netDeltaUsd : null
+    })),
+    runwayDays: latestRuns.map((run) => ({
+      timestamp: run.timestamp,
+      value: run.trendAvailability.runwayDays ? run.runway?.runwayDaysWad ?? null : null
+    }))
   };
 }
 
 function computeLiveRunwayFromLatest(
   latestRun: ParsedRun | undefined,
-  escrowBalanceUsdc: bigint
+  runwayBalanceUsdc: bigint
 ): Pick<DashboardState, "perTickCostUsdc" | "liveRunwayDaysWad" | "liveRunwayUrgency"> {
   const latestRunway = latestRun?.runway;
   if (!latestRunway || latestRunway.perTickCostUsdc <= 0n || latestRunway.ticksPerDayWad <= 0n) {
@@ -290,7 +516,7 @@ function computeLiveRunwayFromLatest(
     };
   }
 
-  const liveRunwayDaysWad = (escrowBalanceUsdc * WAD) / dailyCostUsdc;
+  const liveRunwayDaysWad = (runwayBalanceUsdc * WAD) / dailyCostUsdc;
   const nominalDays = latestRunway.nominalDays > 0n ? latestRunway.nominalDays : 14n;
   const elevatedDays = latestRunway.elevatedDays > 0n ? latestRunway.elevatedDays : 7n;
   const deadDays = latestRunway.deadDays > 0n ? latestRunway.deadDays : 2n;
@@ -300,6 +526,14 @@ function computeLiveRunwayFromLatest(
     liveRunwayDaysWad,
     liveRunwayUrgency: urgencyFromDaysWad(liveRunwayDaysWad, nominalDays, elevatedDays, deadDays)
   };
+}
+
+function resolveRunwayBalanceUsdc(latestRun: ParsedRun | undefined, escrowBalanceUsdc: bigint): bigint {
+  if (!latestRun) return escrowBalanceUsdc;
+  if (latestRun.fundingSource === "conway-credits") {
+    return latestRun.creditBalanceUsdc;
+  }
+  return escrowBalanceUsdc;
 }
 
 async function readRuns(path: string): Promise<ParsedRun[]> {
@@ -704,6 +938,12 @@ export async function queryDashboardState(): Promise<DashboardState> {
 
   const totalEscrowPaidUsdc = escrowPayments.reduce((acc, item) => acc + item.amount, 0n);
 
+  const totalGasPaymentUsdc = runs.reduce(
+    (acc, run) => acc + (run.economics.gasPaymentUsdc ?? 0n),
+    0n
+  );
+  const latestGasPaymentUsdc = latestRun?.economics.gasPaymentUsdc ?? null;
+
   const dedupedUserOpsMap = new Map<string, UserOpView>();
   for (const item of [...verifiedRuns, ...entrypointUserOps]) {
     const key = `${item.userOpHash}-${item.txHash}`;
@@ -723,7 +963,8 @@ export async function queryDashboardState(): Promise<DashboardState> {
     healthFactor: userData[5]
   };
 
-  const liveRunway = computeLiveRunwayFromLatest(latestRun, escrowUsdc);
+  const runwayBalanceUsdc = resolveRunwayBalanceUsdc(latestRun, escrowUsdc);
+  const liveRunway = computeLiveRunwayFromLatest(latestRun, runwayBalanceUsdc);
   const [smartAccountBasename, escrowBasename, championSubmitterBasename] = await Promise.all([
     resolveBasenameWithReverseCheck(client, config.smartAccountAddress),
     resolveBasenameWithReverseCheck(client, config.escrowAddress),
@@ -739,9 +980,18 @@ export async function queryDashboardState(): Promise<DashboardState> {
       currentChampionSubmitter: championSubmitterBasename
     }
   };
+  const dashboardTimestamp = new Date().toISOString();
+  const freshness: DashboardFreshnessView = {
+    dashboard: dashboardTimestamp,
+    autopilot: autopilot.timestamp,
+    latestRun: latestRun?.timestamp ?? null,
+    champion: championFreshnessTimestamp(champion)
+  };
+  const trends = buildDashboardTrends(runs);
 
   return {
-    timestamp: new Date().toISOString(),
+    timestamp: dashboardTimestamp,
+    freshness,
     chainId: config.chainId,
     explorerTxUrl: config.explorerTxUrl,
     smartAccountAddress: config.smartAccountAddress,
@@ -768,11 +1018,19 @@ export async function queryDashboardState(): Promise<DashboardState> {
     netCarryEstimateUsd: latestRun?.economics.netDeltaUsd ?? null,
     lastRunStatus: latestRun?.status ?? null,
     lastRunReason: latestRun?.reason ?? null,
+    fundingSource: latestRun?.fundingSource ?? null,
+    creditBalanceUsdc: latestRun?.creditBalanceUsdc ?? null,
+    topupStatus: latestRun?.topupStatus ?? null,
+    topupAmountUsdc: latestRun?.topupAmountUsdc ?? null,
+    fallbackWarning: latestRun?.fallbackWarning ?? null,
     riskNote: latestRun?.risk.notes ?? null,
     perTickCostUsdc: liveRunway.perTickCostUsdc,
     liveRunwayDaysWad: liveRunway.liveRunwayDaysWad,
     liveRunwayUrgency: liveRunway.liveRunwayUrgency,
+    trends,
     totalEscrowPaidUsdc,
+    totalGasPaymentUsdc,
+    latestGasPaymentUsdc,
     escrowPayments,
     recentUserOps,
     provenance: latestRun?.provenance
@@ -789,40 +1047,71 @@ export async function queryDashboardState(): Promise<DashboardState> {
   };
 }
 
-export async function queryRecentRuns() {
+function buildRecentRunSummary(run: ParsedRun): string {
+  if (typeof run.reason === "string" && run.reason.trim().length > 0) {
+    return run.reason;
+  }
+  if (run.userOp?.summary && run.userOp.summary.trim().length > 0) {
+    return run.userOp.summary;
+  }
+  if (run.decision === "topup-credits") {
+    const status = run.topupStatus;
+    const amount = run.topupAmountUsdc;
+    const amountLabel = amount == null ? "unknown amount" : `${amount.toString()} usdc units`;
+    return `Credit topup ${status} (${amountLabel})`;
+  }
+  return "";
+}
+
+export async function queryRecentRuns(): Promise<RecentRunsView> {
   const config = getDashboardConfig();
   const client = createDashboardPublicClient(config);
   const runs = await readRuns(config.runLogPath);
 
   const result = await Promise.all(
     runs
-      .filter((run) => run.userOp)
+      .filter((run) => run.userOp || run.decision === "topup-credits")
       .slice(-50)
       .map(async (run) => {
-        const txHash = run.userOp!.txHash;
+        const base: Omit<RecentRunView, "receiptStatus" | "userOpHash" | "txHash" | "blockNumber"> = {
+          timestamp: run.timestamp,
+          status: run.status,
+          decision: run.decision,
+          summary: buildRecentRunSummary(run),
+          fundingSource: run.fundingSource,
+          topupStatus: run.topupStatus,
+          topupAmountUsdc: run.topupAmountUsdc,
+          fallbackWarning: run.fallbackWarning ?? null
+        };
+
+        if (!run.userOp) {
+          return {
+            ...base,
+            userOpHash: null,
+            txHash: null,
+            blockNumber: null,
+            receiptStatus: "offchain" as const
+          };
+        }
+
+        const txHash = run.userOp.txHash;
 
         try {
           const receipt = await client.getTransactionReceipt({ hash: txHash });
           return {
-            timestamp: run.timestamp,
-            status: run.status,
-            decision: run.decision,
-            summary: run.reason ?? run.userOp!.summary,
-            userOpHash: run.userOp!.userOpHash,
+            ...base,
+            userOpHash: run.userOp.userOpHash,
             txHash,
             blockNumber: receipt.blockNumber,
-            receiptStatus: receipt.status
+            receiptStatus: receipt.status as Extract<RecentRunReceiptStatus, "success" | "reverted">
           };
         } catch {
           return {
-            timestamp: run.timestamp,
-            status: run.status,
-            decision: run.decision,
-            summary: run.reason ?? run.userOp!.summary,
-            userOpHash: run.userOp!.userOpHash,
+            ...base,
+            userOpHash: run.userOp.userOpHash,
             txHash,
-            blockNumber: run.userOp!.blockNumber,
-            receiptStatus: "unknown"
+            blockNumber: run.userOp.blockNumber,
+            receiptStatus: "unknown" as const
           };
         }
       })

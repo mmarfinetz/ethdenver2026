@@ -136,7 +136,25 @@ Base mainnet addresses already wired in defaults/env templates:
 
 Base Sepolia note: Aave test markets do not currently expose a native wstETH reserve; the provided Sepolia env uses WETH as a stand-in.
 
-### 3) Configure dashboard
+### 3) Configure watcher
+
+```bash
+cp apps/watcher/.env.example apps/watcher/.env
+```
+
+Required critical fields in `apps/watcher/.env`:
+- `BASE_RPC_URL`
+- `ESCROW_ADDRESS`
+- `SHUTDOWN_COMMAND` (or your local equivalent)
+
+Conway billing mode setup in watcher:
+- set `COMPUTE_BILLING_MODE=conway`
+- set `CONWAY_API_BASE_URL`
+- set `CONWAY_PAYER_ADDRESS`
+- set `CONWAY_MIN_CREDITS_BALANCE_USDC` and `CONWAY_MIN_PAYER_BALANCE_USDC`
+- optional: `CONWAY_API_KEY`, `CONWAY_CREDITS_BALANCE_PATH`, `CONWAY_FALLBACK_TO_ESCROW_ON_ERROR`, `WATCH_LOW_CREDITS_GRACE_CHECKS`, `WATCH_LOW_PAYER_GRACE_CHECKS`
+
+### 4) Configure dashboard
 
 ```bash
 cp apps/dashboard/.env.example apps/dashboard/.env.local
@@ -147,7 +165,7 @@ Set:
 - chain/token/pool/entrypoint values
 - `RUN_LOG_PATH` (default expects local agent run logs)
 
-### 4) Run agent
+### 5) Run agent
 
 Dry run:
 
@@ -161,7 +179,7 @@ Live mode:
 pnpm agent:start
 ```
 
-### 5) Run dashboard
+### 6) Run dashboard
 
 ```bash
 pnpm dashboard:dev
@@ -249,6 +267,7 @@ Autopilot is implemented as a separate service under `apps/watcher/src/autopilot
   - `pnpm watcher:verify`
 
 See `docs/autonomy-operations.md` for boundaries, verification, staged deployment, provenance, and phase rollout controls.
+For first mainnet Conway launch operations, use `docs/mainnet-conway-supervised-canary.md`.
 
 ## Base Sepolia Remote E2E
 

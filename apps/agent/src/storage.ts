@@ -1,9 +1,25 @@
 import { jsonReplacer, valueToBigInt } from "@ssa/shared/utils";
-import type { AgentRunRecord, ComputeUrgency, StorageState, WstEthRateSample } from "@ssa/shared/types";
+import type {
+  AgentRunRecord,
+  BillingFundingSource,
+  BillingTopupStatus,
+  ComputeUrgency,
+  StorageState,
+  WstEthRateSample
+} from "@ssa/shared/types";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-const DECISIONS: AgentRunRecord["decision"][] = ["none", "loop", "delever", "fund-escrow", "pay-escrow"];
+const DECISIONS: AgentRunRecord["decision"][] = [
+  "none",
+  "loop",
+  "delever",
+  "fund-escrow",
+  "pay-escrow",
+  "topup-credits"
+];
+const FUNDING_SOURCES: BillingFundingSource[] = ["escrow", "conway-credits", "escrow-fallback"];
+const TOPUP_STATUSES: BillingTopupStatus[] = ["not-attempted", "ok", "skipped", "error"];
 const URGENCIES: ComputeUrgency[] = ["nominal", "elevated", "critical", "dead"];
 
 function parseDecision(value: unknown): AgentRunRecord["decision"] {
@@ -16,6 +32,18 @@ function parseDecision(value: unknown): AgentRunRecord["decision"] {
 function parseUrgency(value: unknown): ComputeUrgency {
   if (typeof value !== "string") return "dead";
   return URGENCIES.includes(value as ComputeUrgency) ? (value as ComputeUrgency) : "dead";
+}
+
+function parseFundingSource(value: unknown): BillingFundingSource {
+  if (typeof value !== "string") return "escrow";
+  return FUNDING_SOURCES.includes(value as BillingFundingSource) ? (value as BillingFundingSource) : "escrow";
+}
+
+function parseTopupStatus(value: unknown): BillingTopupStatus {
+  if (typeof value !== "string") return "not-attempted";
+  return TOPUP_STATUSES.includes(value as BillingTopupStatus)
+    ? (value as BillingTopupStatus)
+    : "not-attempted";
 }
 
 function serializeRun(record: AgentRunRecord): string {
@@ -32,6 +60,8 @@ function parseRun(line: string): AgentRunRecord {
   const runway = payload.runway as Record<string, unknown> | undefined;
   const userOpPayload = payload.userOp as Record<string, unknown> | undefined;
   const provenance = payload.provenance as Record<string, unknown> | undefined;
+  const reconciliation = payload.reconciliation as Record<string, unknown> | undefined;
+  const fallbackRunwayBalance = runway ? valueToBigInt(runway.escrowBalanceUsdc) : 0n;
 
   return {
     timestamp: String(payload.timestamp),
@@ -40,6 +70,29 @@ function parseRun(line: string): AgentRunRecord {
     account: String(payload.account) as `0x${string}`,
     decision: parseDecision(payload.decision),
     dryRun: Boolean(payload.dryRun),
+    creditBalanceUsdc: payload.creditBalanceUsdc == null ? fallbackRunwayBalance : valueToBigInt(payload.creditBalanceUsdc),
+    fundingSource: parseFundingSource(payload.fundingSource),
+    topupStatus: parseTopupStatus(payload.topupStatus),
+    topupAmountUsdc: payload.topupAmountUsdc == null ? 0n : valueToBigInt(payload.topupAmountUsdc),
+    payerAddress: typeof payload.payerAddress === "string" ? (payload.payerAddress as `0x${string}`) : undefined,
+    payerBalanceUsdc: payload.payerBalanceUsdc == null ? undefined : valueToBigInt(payload.payerBalanceUsdc),
+    payerFundingUsdc: payload.payerFundingUsdc == null ? undefined : valueToBigInt(payload.payerFundingUsdc),
+    computeBurnUsdc: payload.computeBurnUsdc == null ? undefined : valueToBigInt(payload.computeBurnUsdc),
+    reconciliation: reconciliation
+      ? {
+          windowHours: Number(reconciliation.windowHours),
+          windowStart: String(reconciliation.windowStart ?? payload.timestamp),
+          windowEnd: String(reconciliation.windowEnd ?? payload.timestamp),
+          payerStartBalanceUsdc: valueToBigInt(reconciliation.payerStartBalanceUsdc),
+          payerEndBalanceUsdc: valueToBigInt(reconciliation.payerEndBalanceUsdc),
+          creditTopupsUsdc: valueToBigInt(reconciliation.creditTopupsUsdc),
+          smartAccountFundingUsdc: valueToBigInt(reconciliation.smartAccountFundingUsdc),
+          lhsUsdc: valueToBigInt(reconciliation.lhsUsdc),
+          rhsUsdc: valueToBigInt(reconciliation.rhsUsdc),
+          withinInvariant: Boolean(reconciliation.withinInvariant)
+        }
+      : undefined,
+    fallbackWarning: typeof payload.fallbackWarning === "string" ? payload.fallbackWarning : undefined,
     position: {
       totalCollateralBase: valueToBigInt(position.totalCollateralBase),
       totalDebtBase: valueToBigInt(position.totalDebtBase),
@@ -70,6 +123,7 @@ function parseRun(line: string): AgentRunRecord {
       breakEvenEquityUsdApprox:
         economics.breakEvenEquityUsdApprox == null ? null : valueToBigInt(economics.breakEvenEquityUsdApprox),
       leverageWad: valueToBigInt(economics.leverageWad),
+      gasPaymentUsdc: economics.gasPaymentUsdc == null ? null : valueToBigInt(economics.gasPaymentUsdc),
       notes: Array.isArray(economics.notes) ? economics.notes.map(String) : []
     },
     runway: runway

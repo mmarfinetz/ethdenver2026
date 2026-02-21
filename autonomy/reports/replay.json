@@ -1,0 +1,67 @@
+{
+  "baselinePath": "/Users/mitch/ethdenver2026/apps/agent/data/runs.ndjson",
+  "candidatePath": "/Users/mitch/ethdenver2026/autonomy/reports/replay-candidate.ndjson",
+  "candidateSource": "simulated_isolated_log",
+  "simulationOnly": true,
+  "baseline": {
+    "totalRuns": 16,
+    "okRuns": 0,
+    "errorRuns": 5,
+    "skippedRuns": 11,
+    "dryRunCount": 16,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 0.3125,
+    "minHealthFactorWad": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "hfBreachCount": 0,
+    "runwayDeadCount": 9,
+    "netDeltaUsdSum": "-395587",
+    "consecutiveFailures": 3,
+    "latestTimestamp": "2026-02-21T01:15:07.961Z"
+  },
+  "candidate": {
+    "totalRuns": 16,
+    "okRuns": 0,
+    "errorRuns": 5,
+    "skippedRuns": 11,
+    "dryRunCount": 16,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 0.3125,
+    "minHealthFactorWad": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "hfBreachCount": 0,
+    "runwayDeadCount": 9,
+    "netDeltaUsdSum": "-395587",
+    "consecutiveFailures": 3,
+    "latestTimestamp": "2026-02-21T01:15:07.961Z"
+  },
+  "checks": [
+    {
+      "name": "hf-breach-count",
+      "ok": true,
+      "detail": "candidate=0 baseline=0"
+    },
+    {
+      "name": "failure-count",
+      "ok": true,
+      "detail": "candidate=5 baseline=5"
+    },
+    {
+      "name": "runway-collapse-count",
+      "ok": true,
+      "detail": "candidate=9 baseline=9"
+    },
+    {
+      "name": "success-rate",
+      "ok": true,
+      "detail": "candidate=0.0000 baseline=0.0000"
+    },
+    {
+      "name": "net-delta",
+      "ok": true,
+      "detail": "candidate=-395587 baseline=-395587"
+    }
+  ],
+  "ok": true,
+  "generatedAt": "2026-02-21T16:40:40.157Z"
+}

@@ -180,6 +180,7 @@ export function computeEconomics(input: EconomicsInput): EconomicsSnapshot {
     netDeltaUsd,
     breakEvenEquityUsdApprox,
     leverageWad,
+    gasPaymentUsdc: null,
     notes
   };
 }

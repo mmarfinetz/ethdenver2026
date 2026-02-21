@@ -1,0 +1,55 @@
+{
+  "stage": "rolled_back",
+  "action": "rollback",
+  "reasons": [
+    "Shadow canary complete (55/50 dry-run cycles)",
+    "Promotion command failed; auto-rollback executed"
+  ],
+  "metrics": {
+    "totalRuns": 55,
+    "okRuns": 55,
+    "errorRuns": 0,
+    "skippedRuns": 0,
+    "dryRunCount": 55,
+    "liveRunCount": 0,
+    "successRate": 1,
+    "errorRate": 0,
+    "minHealthFactorWad": "1200000000000000000",
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "550",
+    "consecutiveFailures": 0,
+    "latestTimestamp": "2026-02-20T00:00:00.000Z"
+  },
+  "baseline": {
+    "totalRuns": 5,
+    "okRuns": 5,
+    "errorRuns": 0,
+    "skippedRuns": 0,
+    "dryRunCount": 5,
+    "liveRunCount": 0,
+    "successRate": 1,
+    "errorRate": 0,
+    "minHealthFactorWad": "1200000000000000000",
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "50",
+    "consecutiveFailures": 0,
+    "latestTimestamp": "2026-02-20T00:00:00.000Z"
+  },
+  "executions": [
+    {
+      "name": "promote",
+      "command": "false",
+      "ok": false,
+      "output": ""
+    },
+    {
+      "name": "rollback",
+      "command": "echo rollback >> \"/var/folders/v2/dbndjj356rzcs68w9pczqcpm0000gn/T/autopilot-deploy-si4Lsz/hooks.log\"",
+      "ok": true,
+      "output": ""
+    }
+  ],
+  "generatedAt": "2026-02-21T16:40:39.605Z"
+}

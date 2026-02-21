@@ -19,14 +19,21 @@ import {
   parseSalt
 } from "@ssa/shared/utils";
 import type { Address, Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { CIRCLE_PAYMASTER_ADDRESS } from "./aa/paymaster";
+
+export type ComputeBillingMode = "escrow" | "conway";
 
 export type AgentConfig = {
   chainId: number;
   dryRun: boolean;
   allowTestnet: boolean;
+  computeBillingMode: ComputeBillingMode;
   baseRpcUrl: string;
   bundlerRpcUrl: string;
   paymasterRpcUrl?: string;
+  useCirclePaymaster: boolean;
+  circlePaymasterAddress: Address;
   entryPointAddress: Address;
   entryPointVersion: "0.7";
   factoryAddress: Address;
@@ -53,6 +60,27 @@ export type AgentConfig = {
   dexRouterAddress: Address;
   zrxApiUrl: string;
   zrxApiKey?: string;
+  conwayApiBaseUrl?: string;
+  conwayApiKey?: string;
+  conwayCreditsBalancePath: string;
+  conwayCreditsTopupPath: string;
+  conwayPaymentRecipientAddress?: Address;
+  conwayPayerAddress?: Address;
+  conwayX402Enabled: boolean;
+  conwayPayerPrivateKey?: Hex;
+  conwayX402HeaderName: string;
+  conwayFallbackToEscrowOnError: boolean;
+  conwayCreditsMinBalanceUsdc: bigint;
+  conwayCreditsTargetBalanceUsdc: bigint;
+  conwayCreditsTopupMaxUsdcPerTick: bigint;
+  conwayCreditsTopupCooldownSeconds: number;
+  conwayPayerMinBalanceUsdc: bigint;
+  conwayPayerTargetBalanceUsdc: bigint;
+  conwayPayerFundMaxUsdcPerTick: bigint;
+  conwayPayerFundMaxUsdcPerDay: bigint;
+  conwayPayerFundCooldownSeconds: number;
+  conwayReconciliationBootstrapUsdc: bigint;
+  conwayReconciliationWindowHours: number;
   runLogPath: string;
   snapshotPath: string;
   swapCostUsdEstimate: bigint;
@@ -76,9 +104,23 @@ function optionalAddress(raw: string | undefined, label: string): Address | unde
   return parseAddress(raw.trim(), label);
 }
 
+function optionalPrivateKey(raw: string | undefined, label: string): Hex | undefined {
+  if (!raw?.trim()) return undefined;
+  const value = raw.trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`Invalid private key for ${label}`);
+  }
+  return value as Hex;
+}
+
 export function loadConfig(): AgentConfig {
   const chainId = parseInteger(process.env.CHAIN_ID ?? String(BASE_MAINNET_CHAIN_ID), "CHAIN_ID");
   const defaults = CHAIN_DEFAULTS[chainId] ?? CHAIN_DEFAULTS[BASE_MAINNET_CHAIN_ID];
+  const computeBillingModeRaw = (process.env.COMPUTE_BILLING_MODE ?? "escrow").trim().toLowerCase();
+  if (computeBillingModeRaw !== "escrow" && computeBillingModeRaw !== "conway") {
+    throw new Error(`COMPUTE_BILLING_MODE must be escrow|conway, got ${computeBillingModeRaw}`);
+  }
+  const computeBillingMode = computeBillingModeRaw as ComputeBillingMode;
 
   const dryRun = parseBoolean(process.env.DRY_RUN, false);
   const allowTestnet = parseBoolean(process.env.ALLOW_TESTNET, false);
@@ -128,6 +170,93 @@ export function loadConfig(): AgentConfig {
     throw new Error("HF_TARGET must be >= 1.0");
   }
 
+  const useCirclePaymaster = parseBoolean(process.env.USE_CIRCLE_PAYMASTER, false);
+  const circlePaymasterAddress =
+    optionalAddress(process.env.CIRCLE_PAYMASTER_ADDRESS, "CIRCLE_PAYMASTER_ADDRESS") ?? CIRCLE_PAYMASTER_ADDRESS;
+
+  const conwayApiBaseUrl = optionalEnv("CONWAY_API_BASE_URL");
+  if (computeBillingMode === "conway" && !conwayApiBaseUrl) {
+    throw new Error("CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway");
+  }
+  const conwayPayerPrivateKey = optionalPrivateKey(process.env.CONWAY_PAYER_PRIVATE_KEY, "CONWAY_PAYER_PRIVATE_KEY");
+  const conwayPayerAddress =
+    optionalAddress(process.env.CONWAY_PAYER_ADDRESS, "CONWAY_PAYER_ADDRESS") ??
+    (conwayPayerPrivateKey ? privateKeyToAccount(conwayPayerPrivateKey).address : undefined);
+  const conwayCreditsMinBalanceUsdc = parseDecimalToUnits(
+    process.env.CONWAY_CREDITS_MIN_BALANCE_USDC ?? "10",
+    usdcDecimals,
+    "CONWAY_CREDITS_MIN_BALANCE_USDC"
+  );
+  const conwayCreditsTargetBalanceUsdc = parseDecimalToUnits(
+    process.env.CONWAY_CREDITS_TARGET_BALANCE_USDC ?? "50",
+    usdcDecimals,
+    "CONWAY_CREDITS_TARGET_BALANCE_USDC"
+  );
+  const conwayCreditsTopupMaxUsdcPerTick = parseDecimalToUnits(
+    process.env.CONWAY_CREDITS_MAX_TOPUP_USDC_PER_TICK ?? "25",
+    usdcDecimals,
+    "CONWAY_CREDITS_MAX_TOPUP_USDC_PER_TICK"
+  );
+  const conwayCreditsTopupCooldownSeconds = parseInteger(
+    process.env.CONWAY_CREDITS_TOPUP_COOLDOWN_SECONDS ?? "900",
+    "CONWAY_CREDITS_TOPUP_COOLDOWN_SECONDS"
+  );
+  const conwayPayerMinBalanceUsdc = parseDecimalToUnits(
+    process.env.CONWAY_PAYER_MIN_BALANCE_USDC ?? "5",
+    usdcDecimals,
+    "CONWAY_PAYER_MIN_BALANCE_USDC"
+  );
+  const conwayPayerTargetBalanceUsdc = parseDecimalToUnits(
+    process.env.CONWAY_PAYER_TARGET_BALANCE_USDC ?? "25",
+    usdcDecimals,
+    "CONWAY_PAYER_TARGET_BALANCE_USDC"
+  );
+  const conwayPayerFundMaxUsdcPerTick = parseDecimalToUnits(
+    process.env.CONWAY_PAYER_MAX_FUND_USDC_PER_TICK ?? "25",
+    usdcDecimals,
+    "CONWAY_PAYER_MAX_FUND_USDC_PER_TICK"
+  );
+  const conwayPayerFundMaxUsdcPerDay = parseDecimalToUnits(
+    process.env.CONWAY_PAYER_MAX_FUND_USDC_PER_DAY ?? "100",
+    usdcDecimals,
+    "CONWAY_PAYER_MAX_FUND_USDC_PER_DAY"
+  );
+  const conwayPayerFundCooldownSeconds = parseInteger(
+    process.env.CONWAY_PAYER_FUND_COOLDOWN_SECONDS ?? "900",
+    "CONWAY_PAYER_FUND_COOLDOWN_SECONDS"
+  );
+  const conwayReconciliationBootstrapUsdc = parseDecimalToUnits(
+    process.env.CONWAY_RECONCILIATION_BOOTSTRAP_USDC ?? "0",
+    usdcDecimals,
+    "CONWAY_RECONCILIATION_BOOTSTRAP_USDC"
+  );
+  const conwayReconciliationWindowHours = parseInteger(
+    process.env.CONWAY_RECONCILIATION_WINDOW_HOURS ?? "24",
+    "CONWAY_RECONCILIATION_WINDOW_HOURS"
+  );
+  if (conwayCreditsTargetBalanceUsdc < conwayCreditsMinBalanceUsdc) {
+    throw new Error("CONWAY_CREDITS_TARGET_BALANCE_USDC must be >= CONWAY_CREDITS_MIN_BALANCE_USDC");
+  }
+  if (conwayPayerTargetBalanceUsdc < conwayPayerMinBalanceUsdc) {
+    throw new Error("CONWAY_PAYER_TARGET_BALANCE_USDC must be >= CONWAY_PAYER_MIN_BALANCE_USDC");
+  }
+  if (conwayCreditsTopupCooldownSeconds < 0) {
+    throw new Error("CONWAY_CREDITS_TOPUP_COOLDOWN_SECONDS must be >= 0");
+  }
+  if (conwayPayerFundCooldownSeconds < 0) {
+    throw new Error("CONWAY_PAYER_FUND_COOLDOWN_SECONDS must be >= 0");
+  }
+  if (conwayReconciliationWindowHours <= 0) {
+    throw new Error("CONWAY_RECONCILIATION_WINDOW_HOURS must be > 0");
+  }
+  if (
+    computeBillingMode === "conway" &&
+    (conwayPayerMinBalanceUsdc > 0n || conwayPayerTargetBalanceUsdc > 0n) &&
+    !conwayPayerAddress
+  ) {
+    throw new Error("CONWAY_PAYER_ADDRESS or CONWAY_PAYER_PRIVATE_KEY is required in Conway billing mode");
+  }
+
   const entryPointAddress = optionalAddress(process.env.ENTRYPOINT_ADDRESS, "ENTRYPOINT_ADDRESS") ?? defaults.entryPoint07;
   const wstEthAddress = optionalAddress(process.env.WSTETH_ADDRESS, "WSTETH_ADDRESS") ?? parseAddress(defaults.wstEth, "WSTETH_ADDRESS");
   const wethAddress = optionalAddress(process.env.WETH_ADDRESS, "WETH_ADDRESS") ?? parseAddress(defaults.weth, "WETH_ADDRESS");
@@ -139,9 +268,12 @@ export function loadConfig(): AgentConfig {
     chainId,
     dryRun,
     allowTestnet,
+    computeBillingMode,
     baseRpcUrl: mustEnv("BASE_RPC_URL"),
     bundlerRpcUrl: mustEnv("BUNDLER_RPC_URL"),
     paymasterRpcUrl: optionalEnv("PAYMASTER_RPC_URL"),
+    useCirclePaymaster,
+    circlePaymasterAddress,
     entryPointAddress,
     entryPointVersion: "0.7",
     factoryAddress: optionalAddress(process.env.FACTORY_ADDRESS, "FACTORY_ADDRESS") ?? defaults.simpleAccountFactory07,
@@ -172,6 +304,30 @@ export function loadConfig(): AgentConfig {
     dexRouterAddress,
     zrxApiUrl: process.env.ZEROX_API_URL?.trim() || "https://base.api.0x.org/swap/allowance-holder/quote",
     zrxApiKey: optionalEnv("ZEROX_API_KEY"),
+    conwayApiBaseUrl,
+    conwayApiKey: optionalEnv("CONWAY_API_KEY"),
+    conwayCreditsBalancePath: process.env.CONWAY_CREDITS_BALANCE_PATH?.trim() || "/v1/credits/balance",
+    conwayCreditsTopupPath: process.env.CONWAY_CREDITS_TOPUP_PATH?.trim() || "/v1/credits/topup",
+    conwayPaymentRecipientAddress: optionalAddress(
+      process.env.CONWAY_PAYMENT_RECIPIENT_ADDRESS,
+      "CONWAY_PAYMENT_RECIPIENT_ADDRESS"
+    ),
+    conwayPayerAddress,
+    conwayX402Enabled: parseBoolean(process.env.CONWAY_X402_ENABLED, true),
+    conwayPayerPrivateKey,
+    conwayX402HeaderName: process.env.CONWAY_X402_HEADER_NAME?.trim() || "x-payment",
+    conwayFallbackToEscrowOnError: parseBoolean(process.env.CONWAY_FALLBACK_TO_ESCROW_ON_ERROR, true),
+    conwayCreditsMinBalanceUsdc,
+    conwayCreditsTargetBalanceUsdc,
+    conwayCreditsTopupMaxUsdcPerTick,
+    conwayCreditsTopupCooldownSeconds,
+    conwayPayerMinBalanceUsdc,
+    conwayPayerTargetBalanceUsdc,
+    conwayPayerFundMaxUsdcPerTick,
+    conwayPayerFundMaxUsdcPerDay,
+    conwayPayerFundCooldownSeconds,
+    conwayReconciliationBootstrapUsdc,
+    conwayReconciliationWindowHours,
     runLogPath: process.env.RUN_LOG_PATH?.trim() || "./data/runs.ndjson",
     snapshotPath: process.env.SNAPSHOT_PATH?.trim() || "./data/wsteth-snapshots.json",
     swapCostUsdEstimate: parseDecimalToUnits(process.env.SWAP_COST_USD_ESTIMATE ?? "0", 8, "SWAP_COST_USD_ESTIMATE"),

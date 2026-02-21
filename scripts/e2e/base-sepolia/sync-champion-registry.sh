@@ -56,7 +56,10 @@ to_bytes32() {
   return 1
 }
 
-readarray -t champ_fields < <(
+champ_fields=()
+while IFS= read -r line; do
+  champ_fields+=("$line")
+done < <(
   node --input-type=module - "$state_path" <<'NODE'
 import { readFileSync } from "node:fs";
 

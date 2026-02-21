@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 type RunStatus = "ok" | "error" | "skipped";
-type RunDecision = "none" | "loop" | "delever" | "fund-escrow" | "pay-escrow";
+type RunDecision = "none" | "loop" | "delever" | "fund-escrow" | "pay-escrow" | "topup-credits";
 type RunUrgency = "nominal" | "elevated" | "critical" | "dead";
 
 export interface EvolutionMetrics {
@@ -12,6 +12,15 @@ export interface EvolutionMetrics {
   diversity?: number;
   eliteFitnessUsd?: number;
   fitnessHistoryUsd?: number[];
+}
+
+export interface RiskMetrics {
+  status: "available" | "unavailable";
+  pLiq7d?: number;
+  pLiq30d?: number;
+  nPaths?: number;
+  horizonDays?: number;
+  notes?: string;
 }
 
 export interface AgentRun {
@@ -30,6 +39,7 @@ export interface AgentRun {
   borrowAprWad?: bigint;
   error?: string;
   evolution?: EvolutionMetrics;
+  risk?: RiskMetrics;
 }
 
 export interface AgentState {
@@ -47,7 +57,7 @@ const RUNS_PATH = resolve(
 const USD_SCALE = 1e8;
 const WAD_SCALE = 1e18;
 const RAY_PER_WAD = 1_000_000_000n;
-const DECISIONS = new Set<RunDecision>(["none", "loop", "delever", "fund-escrow", "pay-escrow"]);
+const DECISIONS = new Set<RunDecision>(["none", "loop", "delever", "fund-escrow", "pay-escrow", "topup-credits"]);
 const STATUSES = new Set<RunStatus>(["ok", "error", "skipped"]);
 const URGENCIES = new Set<RunUrgency>(["nominal", "elevated", "critical", "dead"]);
 
@@ -151,6 +161,28 @@ function parseEvolution(raw: Record<string, unknown> | undefined): EvolutionMetr
   return evolution;
 }
 
+function parseRisk(raw: Record<string, unknown> | undefined): RiskMetrics | undefined {
+  if (!raw) return undefined;
+  const status = raw.status === "available" ? "available" : raw.status === "unavailable" ? "unavailable" : undefined;
+  if (!status) return undefined;
+
+  const pLiq7d = parseNumber(raw.pLiq7d);
+  const pLiq30d = parseNumber(raw.pLiq30d);
+  const notes = typeof raw.notes === "string" ? raw.notes : undefined;
+
+  // Try to extract nPaths and horizonDays from the notes string
+  let nPaths: number | undefined;
+  let horizonDays: number | undefined;
+  if (notes) {
+    const pathsMatch = notes.match(/(\d[\d,]*)\s*paths/);
+    if (pathsMatch) nPaths = Number(pathsMatch[1].replace(/,/g, ""));
+    const horizonMatch = notes.match(/horizon\s*(\d+)d/);
+    if (horizonMatch) horizonDays = Number(horizonMatch[1]);
+  }
+
+  return { status, pLiq7d, pLiq30d, nPaths, horizonDays, notes };
+}
+
 function normalizeRun(raw: unknown): AgentRun | null {
   const payload = asRecord(raw);
   if (!payload) return null;
@@ -178,6 +210,7 @@ function normalizeRun(raw: unknown): AgentRun | null {
     evolution: parseEvolution(
       asRecord(payload.evolution) ?? asRecord(payload.ga) ?? asRecord(payload.genetics),
     ),
+    risk: parseRisk(asRecord(payload.risk)),
   };
 
   return run;

@@ -7,6 +7,8 @@
  * of box-drawing characters.
  */
 
+import type { DrawBuffer } from "./draw-buffer.js";
+
 const SUBPIXELS_X = 2;
 const SUBPIXELS_Y = 4;
 
@@ -29,7 +31,7 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-export class BrailleBuffer {
+export class BrailleBuffer implements DrawBuffer {
   readonly pixelWidth: number;
   readonly pixelHeight: number;
   readonly cellWidth: number;

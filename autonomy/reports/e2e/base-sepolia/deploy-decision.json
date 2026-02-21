@@ -1,0 +1,41 @@
+{
+  "stage": "shadow_canary",
+  "action": "hold",
+  "reasons": [
+    "Canary stage still collecting evidence"
+  ],
+  "metrics": {
+    "totalRuns": 1,
+    "okRuns": 0,
+    "errorRuns": 1,
+    "skippedRuns": 0,
+    "dryRunCount": 1,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 1,
+    "minHealthFactorWad": null,
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "0",
+    "consecutiveFailures": 1,
+    "latestTimestamp": "2026-02-21T02:06:00.810Z"
+  },
+  "baseline": {
+    "totalRuns": 1,
+    "okRuns": 0,
+    "errorRuns": 1,
+    "skippedRuns": 0,
+    "dryRunCount": 1,
+    "liveRunCount": 0,
+    "successRate": 0,
+    "errorRate": 1,
+    "minHealthFactorWad": null,
+    "hfBreachCount": 0,
+    "runwayDeadCount": 0,
+    "netDeltaUsdSum": "0",
+    "consecutiveFailures": 1,
+    "latestTimestamp": "2026-02-21T02:05:45.054Z"
+  },
+  "executions": [],
+  "generatedAt": "2026-02-21T02:06:20.230Z"
+}

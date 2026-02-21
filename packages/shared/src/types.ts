@@ -34,6 +34,8 @@ export type EconomicsSnapshot = {
   netDeltaUsd: bigint;
   breakEvenEquityUsdApprox: bigint | null;
   leverageWad: bigint;
+  /** USDC spent on gas via Circle Paymaster (null if using ETH for gas) */
+  gasPaymentUsdc: bigint | null;
   notes: string[];
 };
 
@@ -49,7 +51,12 @@ export type ActionDecision =
   | "loop"
   | "delever"
   | "fund-escrow"
-  | "pay-escrow";
+  | "pay-escrow"
+  | "topup-credits";
+
+export type BillingFundingSource = "escrow" | "conway-credits" | "escrow-fallback";
+
+export type BillingTopupStatus = "not-attempted" | "ok" | "skipped" | "error";
 
 export type ComputeUrgency = "nominal" | "elevated" | "critical" | "dead";
 
@@ -86,6 +93,19 @@ export type RuntimeProvenance = {
   commitSha: string;
 };
 
+export type ConwayReconciliationSnapshot = {
+  windowHours: number;
+  windowStart: string;
+  windowEnd: string;
+  payerStartBalanceUsdc: bigint;
+  payerEndBalanceUsdc: bigint;
+  creditTopupsUsdc: bigint;
+  smartAccountFundingUsdc: bigint;
+  lhsUsdc: bigint;
+  rhsUsdc: bigint;
+  withinInvariant: boolean;
+};
+
 export type AgentRunRecord = {
   timestamp: string;
   mode: RunMode;
@@ -93,6 +113,16 @@ export type AgentRunRecord = {
   account: Address;
   decision: ActionDecision;
   dryRun: boolean;
+  creditBalanceUsdc: bigint;
+  fundingSource: BillingFundingSource;
+  topupStatus: BillingTopupStatus;
+  topupAmountUsdc: bigint;
+  payerAddress?: Address;
+  payerBalanceUsdc?: bigint;
+  payerFundingUsdc?: bigint;
+  computeBurnUsdc?: bigint;
+  reconciliation?: ConwayReconciliationSnapshot;
+  fallbackWarning?: string;
   position: PositionSnapshot;
   balances: Balances;
   rates: RateSnapshot;

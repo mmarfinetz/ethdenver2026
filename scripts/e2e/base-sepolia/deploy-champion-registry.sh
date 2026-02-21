@@ -41,6 +41,7 @@ deploy_output="$(
   forge create contracts/src/ChampionRegistry.sol:ChampionRegistry \
     --rpc-url "$rpc_url" \
     --private-key "$private_key" \
+    --broadcast \
     --constructor-args "$owner" "$lineage_root" "$provenance_root" \
     2>&1
 )"

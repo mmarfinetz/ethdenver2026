@@ -65,6 +65,18 @@
       "chainId": 84532,
       "blockNumber": "37919980",
       "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T15:54:14.957Z",
+      "chainId": 84532,
+      "blockNumber": "37960483",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T16:30:28.046Z",
+      "chainId": 84532,
+      "blockNumber": "37961570",
+      "wstEthPerToken": "1000000000000000000"
     }
   ]
 }

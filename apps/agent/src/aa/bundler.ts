@@ -2,8 +2,8 @@ import type { Address, Chain, Hex } from "viem";
 import { formatUserOperationRequest, createBundlerClient } from "viem/account-abstraction";
 import { http } from "viem";
 import type { SmartAccount } from "viem/account-abstraction";
-import type { OptionalPaymasterClient } from "./paymaster";
-import { toPaymasterParam } from "./paymaster";
+import type { CirclePaymasterConfig, OptionalPaymasterClient } from "./paymaster";
+import { createCirclePaymasterFields, toPaymasterParam } from "./paymaster";
 
 export type Call = {
   to: Address;
@@ -21,6 +21,8 @@ export type UserOpExecutionResult = {
   txHash?: Hex;
   blockNumber?: bigint;
   reason?: string;
+  /** Set when Circle Paymaster was used — indicates gas was paid in USDC */
+  circlePaymasterUsed?: boolean;
 };
 
 export type BundlerContext = {
@@ -48,9 +50,11 @@ export async function sendUserOperation(
   callDataWithSuffix: Hex,
   builderSuffix: Hex,
   dryRun: boolean,
-  paymasterClient?: OptionalPaymasterClient
+  paymasterClient?: OptionalPaymasterClient,
+  circlePaymaster?: CirclePaymasterConfig
 ): Promise<UserOpExecutionResult> {
   const callData = await account.encodeCalls(calls);
+  const useCircle = circlePaymaster?.enabled === true;
 
   if (dryRun) {
     return {
@@ -59,22 +63,38 @@ export async function sendUserOperation(
       callData,
       callDataWithSuffix,
       builderSuffix,
-      reason: "DRY_RUN enabled. UserOperation not sent."
+      circlePaymasterUsed: useCircle,
+      reason: `DRY_RUN enabled. UserOperation not sent.${useCircle ? " (Circle Paymaster would be used)" : ""}`
     };
   }
 
-  const paymasterParam = toPaymasterParam(paymasterClient);
+  let paymasterOverrides: Record<string, unknown> = {};
+
+  if (useCircle) {
+    // Circle Paymaster: set paymaster fields directly on the userOp
+    const fields = createCirclePaymasterFields(circlePaymaster);
+    paymasterOverrides = {
+      paymaster: fields.paymaster,
+      paymasterVerificationGasLimit: fields.paymasterVerificationGasLimit,
+      paymasterPostOpGasLimit: fields.paymasterPostOpGasLimit,
+      paymasterData: fields.paymasterData
+    };
+  }
+
+  const paymasterParam = useCircle ? undefined : toPaymasterParam(paymasterClient);
 
   const prepared = await context.bundlerClient.prepareUserOperation({
     account,
     callData: callDataWithSuffix,
-    ...(paymasterParam ? { paymaster: paymasterParam } : {})
+    ...(paymasterParam ? { paymaster: paymasterParam } : {}),
+    ...paymasterOverrides
   } as never);
 
   const userOperation = {
     ...(prepared as object),
     sender: account.address,
-    callData: callDataWithSuffix
+    callData: callDataWithSuffix,
+    ...paymasterOverrides
   } as never;
 
   const signature = await account.signUserOperation(userOperation);
@@ -105,6 +125,7 @@ export async function sendUserOperation(
     userOpHash,
     txHash: receipt.receipt.transactionHash,
     blockNumber: receipt.receipt.blockNumber,
-    reason: receipt.reason
+    reason: receipt.reason,
+    circlePaymasterUsed: useCircle
   };
 }
