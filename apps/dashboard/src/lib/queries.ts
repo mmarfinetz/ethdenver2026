@@ -494,6 +494,7 @@ async function queryEscrowPayments(
   usdcAddress: Hex,
   fromBlock: bigint
 ): Promise<EscrowPaymentView[]> {
+  try {
   const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
   const logs = await client.getLogs({
@@ -531,6 +532,9 @@ async function queryEscrowPayments(
   );
 
   return enriched.sort((a, b) => Number(b.blockNumber - a.blockNumber)).slice(0, 50);
+  } catch {
+    return [];
+  }
 }
 
 async function queryEntryPointUserOps(
@@ -539,6 +543,7 @@ async function queryEntryPointUserOps(
   sender: Hex,
   fromBlock: bigint
 ): Promise<UserOpView[]> {
+  try {
   const logs = await client.getLogs({
     address: entryPoint,
     event: entryPointAbi[1],
@@ -575,6 +580,9 @@ async function queryEntryPointUserOps(
   );
 
   return items.sort((a, b) => Number(b.blockNumber - a.blockNumber)).slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 async function readWstEthPerToken(client: PublicClient, token: Hex): Promise<bigint> {
