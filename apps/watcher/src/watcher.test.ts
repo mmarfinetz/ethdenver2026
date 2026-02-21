@@ -135,14 +135,14 @@ test("readFundingBalanceUsdc uses Conway balance when available", async () => {
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
-    new Response(JSON.stringify({ balanceUsdc: "1234567" }), {
+    new Response(JSON.stringify({ credits_cents: "12345" }), {
       status: 200,
       headers: { "content-type": "application/json" }
     });
 
   try {
     const result = await readFundingBalanceUsdc(client, conwayConfig());
-    assert.equal(result.creditsBalanceUsdc, 1234567n);
+    assert.equal(result.creditsBalanceUsdc, 123_450_000n);
     assert.equal(result.creditsSource, "conway");
     assert.equal(result.payerBalanceUsdc, 7_654_321n);
     assert.equal(result.fallbackToEscrow, false);

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --import tsx/esm src/watcher.ts",
+    "start:sepolia": "DOTENV_CONFIG_PATH=.env.sepolia.local node --import tsx/esm src/watcher.ts",
     "autopilot:start": "node --import tsx/esm src/autopilot/index.ts",
     "autopilot:policy-gate": "node --import tsx/esm src/autopilot/policyGate.ts",
     "autopilot:replay": "node --import tsx/esm src/autopilot/replay.ts",

@@ -44,6 +44,14 @@ function asBigInt(value: unknown): bigint | null {
   return null;
 }
 
+function centsToUsdcUnits(value: unknown): bigint | null {
+  const cents = asBigInt(value);
+  if (cents === null) return null;
+  // Conway may return credit balances in USD cents.
+  // Convert cents -> USDC base units (6 decimals).
+  return cents * 10_000n;
+}
+
 function coalesceBigInt(values: unknown[]): bigint | null {
   for (const value of values) {
     const parsed = asBigInt(value);
@@ -118,6 +126,12 @@ export function extractBalanceUsdc(payload: unknown): bigint | null {
     credits?.balance,
     data?.balanceUsdc,
     data?.balance
+  ]) ?? coalesceBigInt([
+    centsToUsdcUnits(root.credits_cents),
+    centsToUsdcUnits(root.balance_cents),
+    centsToUsdcUnits(credits?.cents),
+    centsToUsdcUnits(data?.credits_cents),
+    centsToUsdcUnits(data?.balance_cents)
   ]);
 }
 
@@ -135,6 +149,11 @@ function extractTopupUsdc(payload: unknown): bigint | null {
     topup?.creditedUsdc,
     data?.amountUsdc,
     data?.creditedUsdc
+  ]) ?? coalesceBigInt([
+    centsToUsdcUnits(root.credited_cents),
+    centsToUsdcUnits(root.amount_cents),
+    centsToUsdcUnits(topup?.credited_cents),
+    centsToUsdcUnits(data?.credited_cents)
   ]);
 }
 

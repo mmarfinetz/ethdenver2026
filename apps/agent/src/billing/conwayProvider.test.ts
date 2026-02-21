@@ -79,6 +79,7 @@ test("extractBalanceUsdc supports nested payload shapes", () => {
   assert.equal(extractBalanceUsdc({ balanceUsdc: "1234" }), 1234n);
   assert.equal(extractBalanceUsdc({ credits: { balance: "55" } }), 55n);
   assert.equal(extractBalanceUsdc({ data: { balanceUsdc: 99 } }), 99n);
+  assert.equal(extractBalanceUsdc({ credits_cents: "1234" }), 12_340_000n);
   assert.equal(extractBalanceUsdc({}), null);
 });
 

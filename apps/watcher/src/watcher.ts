@@ -91,6 +91,12 @@ function asBigInt(value: unknown): bigint | null {
   return null;
 }
 
+function centsToUsdcUnits(value: unknown): bigint | null {
+  const cents = asBigInt(value);
+  if (cents === null) return null;
+  return cents * 10_000n;
+}
+
 function coalesceBigInt(values: unknown[]): bigint | null {
   for (const value of values) {
     const parsed = asBigInt(value);
@@ -113,6 +119,12 @@ function extractConwayBalanceUsdc(payload: unknown): bigint | null {
     credits?.balance,
     data?.balanceUsdc,
     data?.balance
+  ]) ?? coalesceBigInt([
+    centsToUsdcUnits(root.credits_cents),
+    centsToUsdcUnits(root.balance_cents),
+    centsToUsdcUnits(credits?.cents),
+    centsToUsdcUnits(data?.credits_cents),
+    centsToUsdcUnits(data?.balance_cents)
   ]);
 }
 

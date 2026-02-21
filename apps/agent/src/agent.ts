@@ -100,6 +100,10 @@ function toRunwayDaysString(runway: ComputeRunway): string {
   return (Number(runway.runwayDaysWad) / 1e18).toFixed(2);
 }
 
+function isSameAssetLoopMode(config: Config): boolean {
+  return config.wstEthAddress.toLowerCase() === config.wethAddress.toLowerCase();
+}
+
 function buildRuntimeProvenance(): AgentRunRecord["provenance"] {
   return {
     agentVersion: process.env.AGENT_VERSION?.trim() || "0.1.0",
@@ -372,39 +376,44 @@ async function planDeleverAction(config: Config, snapshot: Snapshot, account: `0
 
   const calls: Call[] = [];
   let swapCostUsd = 0n;
+  const sameAssetLoopMode = isSameAssetLoopMode(config);
 
   if (snapshot.balances.weth < repayWeth) {
     const neededWeth = repayWeth - snapshot.balances.weth;
 
-    const quote = await getSwapQuote(config, {
-      sellToken: config.wstEthAddress,
-      buyToken: config.wethAddress,
-      buyAmount: neededWeth,
-      slippageBps: config.slippageBps,
-      taker: account
-    });
+    if (sameAssetLoopMode) {
+      calls.push(callWithdraw(config.aavePoolAddress, config.wethAddress, neededWeth, account));
+    } else {
+      const quote = await getSwapQuote(config, {
+        sellToken: config.wstEthAddress,
+        buyToken: config.wethAddress,
+        buyAmount: neededWeth,
+        slippageBps: config.slippageBps,
+        taker: account
+      });
 
-    const withdrawNeeded = safeSub(quote.sellAmount, snapshot.balances.wstEth);
+      const withdrawNeeded = safeSub(quote.sellAmount, snapshot.balances.wstEth);
 
-    if (withdrawNeeded > 0n) {
-      calls.push(callWithdraw(config.aavePoolAddress, config.wstEthAddress, withdrawNeeded, account));
+      if (withdrawNeeded > 0n) {
+        calls.push(callWithdraw(config.aavePoolAddress, config.wstEthAddress, withdrawNeeded, account));
+      }
+
+      calls.push(callApprove(config.wstEthAddress, quote.allowanceTarget, quote.sellAmount));
+      calls.push({
+        to: quote.to,
+        data: quote.data,
+        value: quote.value
+      });
+
+      swapCostUsd = computeSwapCostUsd(
+        quote.sellAmount,
+        WSTETH_DECIMALS,
+        snapshot.prices.wstEthUsd,
+        quote.buyAmount,
+        WETH_DECIMALS,
+        snapshot.prices.wethUsd
+      );
     }
-
-    calls.push(callApprove(config.wstEthAddress, quote.allowanceTarget, quote.sellAmount));
-    calls.push({
-      to: quote.to,
-      data: quote.data,
-      value: quote.value
-    });
-
-    swapCostUsd = computeSwapCostUsd(
-      quote.sellAmount,
-      WSTETH_DECIMALS,
-      snapshot.prices.wstEthUsd,
-      quote.buyAmount,
-      WETH_DECIMALS,
-      snapshot.prices.wethUsd
-    );
   }
 
   calls.push(callApprove(config.wethAddress, config.aavePoolAddress, repayWeth));
@@ -483,6 +492,24 @@ async function planLoopAction(config: Config, snapshot: Snapshot, account: `0x${
     throw new Error(
       `Loop rejected: projected HF after borrow ${toHfString(projectedBorrowHf)} < guard ${toHfString(hfGuard)}`
     );
+  }
+
+  if (isSameAssetLoopMode(config)) {
+    const calls: Call[] = [
+      callBorrow(config.aavePoolAddress, config.wethAddress, borrowWeth, account),
+      callApprove(config.wethAddress, config.aavePoolAddress, borrowWeth),
+      callSupply(config.aavePoolAddress, config.wethAddress, borrowWeth, account)
+    ];
+
+    return {
+      decision: "loop",
+      calls,
+      swapCostUsd: 0n,
+      escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: "loop",
+      summary: `Loop: borrow ${formatToken(borrowWeth, WETH_DECIMALS)} WETH and resupply WETH (same-asset mode)`
+    };
   }
 
   const targetBuyWst = usdToToken(

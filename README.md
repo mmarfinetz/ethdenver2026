@@ -136,6 +136,23 @@ Base mainnet addresses already wired in defaults/env templates:
 
 Base Sepolia note: Aave test markets do not currently expose a native wstETH reserve; the provided Sepolia env uses WETH as a stand-in.
 
+### Base Sepolia Demo Profile
+
+Use separate local env files so you do not overwrite mainnet `.env` values:
+
+```bash
+cp apps/agent/.env.sepolia.example apps/agent/.env.sepolia.local
+cp apps/watcher/.env.sepolia.example apps/watcher/.env.sepolia.local
+```
+
+Then run Sepolia-specific commands:
+
+```bash
+pnpm agent:dry-run:sepolia
+pnpm watcher:start:sepolia
+pnpm agent:start:sepolia
+```
+
 ### 3) Configure watcher
 
 ```bash

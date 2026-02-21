@@ -6,6 +6,8 @@
   "scripts": {
     "start": "tsx src/agent.ts",
     "dry-run": "DRY_RUN=true tsx src/agent.ts",
+    "start:sepolia": "DOTENV_CONFIG_PATH=.env.sepolia.local tsx src/agent.ts",
+    "dry-run:sepolia": "DOTENV_CONFIG_PATH=.env.sepolia.local DRY_RUN=true tsx src/agent.ts",
     "test": "node --import tsx/esm --test \"src/*.test.ts\" \"src/**/*.test.ts\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json"
