@@ -113,6 +113,12 @@ function optionalPrivateKey(raw: string | undefined, label: string): Hex | undef
   return value as Hex;
 }
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function isZeroAddress(value: Address): boolean {
+  return value.toLowerCase() === ZERO_ADDRESS;
+}
+
 export function loadConfig(): AgentConfig {
   const chainId = parseInteger(process.env.CHAIN_ID ?? String(BASE_MAINNET_CHAIN_ID), "CHAIN_ID");
   const defaults = CHAIN_DEFAULTS[chainId] ?? CHAIN_DEFAULTS[BASE_MAINNET_CHAIN_ID];
@@ -263,6 +269,18 @@ export function loadConfig(): AgentConfig {
   const usdcAddress = optionalAddress(process.env.USDC_ADDRESS, "USDC_ADDRESS") ?? parseAddress(defaults.usdc, "USDC_ADDRESS");
   const aavePoolAddress = optionalAddress(process.env.AAVE_POOL_ADDRESS, "AAVE_POOL_ADDRESS") ?? parseAddress(defaults.aavePool, "AAVE_POOL_ADDRESS");
   const dexRouterAddress = optionalAddress(process.env.DEX_ROUTER_ADDRESS, "DEX_ROUTER_ADDRESS") ?? parseAddress(defaults.dexRouter, "DEX_ROUTER_ADDRESS");
+  const escrowAddress = parseAddress(mustEnv("ESCROW_ADDRESS"), "ESCROW_ADDRESS");
+  if (!dryRun && isZeroAddress(escrowAddress)) {
+    throw new Error("ESCROW_ADDRESS must be a non-zero address in live mode");
+  }
+  const monthlyServerCostUsdc = parseDecimalToUnits(
+    process.env.MONTHLY_SERVER_COST_USDC ?? "7.50",
+    usdcDecimals,
+    "MONTHLY_SERVER_COST_USDC"
+  );
+  if (!dryRun && monthlyServerCostUsdc <= 0n) {
+    throw new Error("MONTHLY_SERVER_COST_USDC must be > 0 in live mode");
+  }
 
   return {
     chainId,
@@ -285,12 +303,8 @@ export function loadConfig(): AgentConfig {
     maxLoops: parseInteger(process.env.MAX_LOOPS ?? "5", "MAX_LOOPS"),
     loopBorrowBps,
     runIntervalSeconds,
-    escrowAddress: parseAddress(mustEnv("ESCROW_ADDRESS"), "ESCROW_ADDRESS"),
-    monthlyServerCostUsdc: parseDecimalToUnits(
-      process.env.MONTHLY_SERVER_COST_USDC ?? "7.50",
-      usdcDecimals,
-      "MONTHLY_SERVER_COST_USDC"
-    ),
+    escrowAddress,
+    monthlyServerCostUsdc,
     computeBufferBps,
     runwayNominalDays,
     runwayElevatedDays,

@@ -10,6 +10,7 @@ const BASE_ENV: Record<string, string> = {
   BUILDER_CODE: "bc_test_builder_code",
   OWNER_PRIVATE_KEY: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   USDC_DECIMALS: "6",
+  DRY_RUN: "true",
   ESCROW_ADDRESS: "0x0000000000000000000000000000000000000000",
   COMPUTE_BILLING_MODE: "escrow",
   CONWAY_API_BASE_URL: "",
@@ -139,6 +140,31 @@ test("loadConfig accepts conway billing settings", () => {
       assert.equal(config.conwayX402Enabled, true);
       assert.equal(config.conwayPayerFundMaxUsdcPerDay, 100_000_000n);
       assert.equal(config.conwayCreditsTargetBalanceUsdc, 50_000_000n);
+    }
+  );
+});
+
+test("loadConfig rejects zero escrow address in live mode", () => {
+  withEnv(
+    {
+      DRY_RUN: "false",
+      ESCROW_ADDRESS: "0x0000000000000000000000000000000000000000"
+    },
+    () => {
+      assert.throws(() => loadConfig(), /ESCROW_ADDRESS must be a non-zero address in live mode/);
+    }
+  );
+});
+
+test("loadConfig rejects zero monthly server cost in live mode", () => {
+  withEnv(
+    {
+      DRY_RUN: "false",
+      ESCROW_ADDRESS: "0x0000000000000000000000000000000000000001",
+      MONTHLY_SERVER_COST_USDC: "0"
+    },
+    () => {
+      assert.throws(() => loadConfig(), /MONTHLY_SERVER_COST_USDC must be > 0 in live mode/);
     }
   );
 });

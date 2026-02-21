@@ -202,6 +202,20 @@ pnpm agent:start
 pnpm dashboard:dev
 ```
 
+### 7) Run continuously on VPS (mainnet)
+
+Use the production runbook:
+
+- `docs/vps-mainnet-continuous-ops.md`
+
+Key commands:
+
+```bash
+bash scripts/vps/preflight-mainnet.sh
+sudo RUN_USER="$USER" REPO_DIR=/opt/ethdenver2026 SERVICE_PREFIX=ssa bash scripts/vps/install-systemd-services.sh
+bash scripts/vps/check-billing-health.sh
+```
+
 ## What the Agent Does Each Interval
 
 1. Reads onchain state (balances, Aave position, reserve rates, oracle prices, wstETH rate)
