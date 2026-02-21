@@ -8,7 +8,8 @@
     "./abis": "./src/abis/index.ts",
     "./constants": "./src/constants.ts",
     "./types": "./src/types.ts",
-    "./utils": "./src/utils.ts"
+    "./utils": "./src/utils.ts",
+    "./telemetry": "./src/telemetry.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

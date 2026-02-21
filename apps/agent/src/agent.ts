@@ -47,6 +47,7 @@ import {
   type RiskSnapshot
 } from "./policy/riskEngine";
 import { startScheduler } from "./scheduler";
+import { pushTelemetry } from "@ssa/shared/telemetry";
 import {
   appendRateSample,
   appendRunRecord,
@@ -657,6 +658,7 @@ async function main(): Promise<void> {
         runRecord.status = "skipped";
         runRecord.reason = planned.summary;
         await appendRunRecord(config.runLogPath, runRecord);
+        pushTelemetry("run", runRecord);
         console.log(
           `[run] skipped: ${planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
         );
@@ -736,6 +738,7 @@ async function main(): Promise<void> {
       }
 
       await appendRunRecord(config.runLogPath, runRecord);
+      pushTelemetry("run", runRecord);
 
       const aprLabel = apr ? toWadPercentString(apr) : "n/a";
       console.log(
@@ -803,6 +806,7 @@ main().catch(async (error) => {
       };
 
     await appendRunRecord(config.runLogPath, fallbackRecord);
+    pushTelemetry("run", fallbackRecord);
   } catch {
     // ignore fallback logging failures
   }

@@ -1,3 +1,4 @@
+import { pushTelemetry } from "@ssa/shared/telemetry";
 import { readFile } from "node:fs/promises";
 import { nowIso, repoPath, writeJson } from "./common";
 import type { AutopilotState, DeploymentStage } from "./types";
@@ -45,5 +46,6 @@ export async function writeAutopilotState(
   };
 
   await writeJson(path, next);
+  pushTelemetry("autopilot-state", next);
   return next;
 }

@@ -11,6 +11,7 @@ import type { AgentRunRecord, ChampionGateStatus, ComputeUrgency } from "@ssa/sh
 import { valueToBigInt } from "@ssa/shared/utils";
 import { readFile } from "node:fs/promises";
 import type { Hex, PublicClient } from "viem";
+import { readBlobText } from "./blob";
 import { isAddress, parseAbiItem } from "viem";
 import { resolveBasenameWithReverseCheck } from "./basenames";
 import { createDashboardPublicClient, getDashboardConfig } from "./viem";
@@ -303,7 +304,10 @@ function computeLiveRunwayFromLatest(
 
 async function readRuns(path: string): Promise<ParsedRun[]> {
   try {
-    const raw = await readFile(path, "utf8");
+    const raw = process.env.VERCEL
+      ? await readBlobText("telemetry/runs.ndjson")
+      : await readFile(path, "utf8");
+    if (!raw) return [];
     return raw
       .split("\n")
       .map((line) => line.trim())
@@ -326,7 +330,10 @@ async function readAutopilotState(statePath: string, policyPath: string): Promis
   }
 
   try {
-    const raw = await readFile(statePath, "utf8");
+    const raw = process.env.VERCEL
+      ? await readBlobText("telemetry/autopilot-state.json")
+      : await readFile(statePath, "utf8");
+    if (!raw) throw new Error("no data");
     const state = JSON.parse(raw) as Record<string, unknown>;
     const lastProposal = state.lastProposal as Record<string, unknown> | undefined;
     const lastPolicyGate = state.lastPolicyGate as Record<string, unknown> | undefined;
@@ -420,7 +427,10 @@ async function readChampionState(
   registryAddressFallback: Hex | null
 ): Promise<ChampionStateView> {
   try {
-    const raw = await readFile(championStatePath, "utf8");
+    const raw = process.env.VERCEL
+      ? await readBlobText("telemetry/champion-state.json")
+      : await readFile(championStatePath, "utf8");
+    if (!raw) throw new Error("no data");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const lineageRaw = Array.isArray(parsed.lineage) ? parsed.lineage : [];
     const lineage = lineageRaw
