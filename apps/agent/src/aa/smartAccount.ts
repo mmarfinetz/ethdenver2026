@@ -134,7 +134,7 @@ export async function createSimpleSmartAccount(
       }
 
       const userOpHash = getUserOperationHash({
-        chainId: parameters.chainId ?? params.walletClient.chain!.id,
+        chainId: params.walletClient.chain!.id,
         entryPointAddress: params.entryPointAddress,
         entryPointVersion: "0.7",
         userOperation: {
@@ -162,7 +162,7 @@ export async function createSimpleSmartAccount(
     },
     async signUserOperation(parameters) {
       const userOpHash = getUserOperationHash({
-        chainId: parameters.chainId ?? params.walletClient.chain!.id,
+        chainId: params.walletClient.chain!.id,
         entryPointAddress: params.entryPointAddress,
         entryPointVersion: "0.7",
         userOperation: {
