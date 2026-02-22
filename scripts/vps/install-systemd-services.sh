@@ -58,8 +58,10 @@ PNPM_INSTALL_FLAG="--frozen-lockfile"
 if [[ ! -f "$REPO_DIR/pnpm-lock.yaml" ]]; then
   PNPM_INSTALL_FLAG="--no-frozen-lockfile"
 fi
+NODE_BUILD_MAX_OLD_SPACE_MB="${NODE_BUILD_MAX_OLD_SPACE_MB:-1024}"
+BUILD_NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MAX_OLD_SPACE_MB}"
 
-info "repoDir=$REPO_DIR user=$RUN_USER group=$RUN_GROUP servicePrefix=$SERVICE_PREFIX"
+info "repoDir=$REPO_DIR user=$RUN_USER group=$RUN_GROUP servicePrefix=$SERVICE_PREFIX buildHeapMb=$NODE_BUILD_MAX_OLD_SPACE_MB"
 
 upsert_env_key "$REPO_DIR/apps/watcher/.env" "SHUTDOWN_COMMAND" "systemctl stop ${AGENT_SERVICE}"
 
@@ -68,8 +70,8 @@ sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && bash scripts/vps/preflight-mainn
 
 info "installing dependencies and building agent/watcher"
 sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm install $PNPM_INSTALL_FLAG"
-sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm --filter agent build"
-sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && corepack pnpm --filter watcher build"
+sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && NODE_OPTIONS='$BUILD_NODE_OPTIONS' corepack pnpm --filter agent build"
+sudo -u "$RUN_USER" bash -lc "cd '$REPO_DIR' && NODE_OPTIONS='$BUILD_NODE_OPTIONS' corepack pnpm --filter watcher build"
 
 info "writing $AGENT_UNIT"
 cat > "$AGENT_UNIT" <<EOF

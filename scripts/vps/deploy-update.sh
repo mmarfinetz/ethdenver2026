@@ -30,6 +30,8 @@ PNPM_INSTALL_FLAG="--frozen-lockfile"
 if [[ ! -f "$REPO_DIR/pnpm-lock.yaml" ]]; then
   PNPM_INSTALL_FLAG="--no-frozen-lockfile"
 fi
+NODE_BUILD_MAX_OLD_SPACE_MB="${NODE_BUILD_MAX_OLD_SPACE_MB:-1024}"
+BUILD_NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MAX_OLD_SPACE_MB}"
 
 if [[ -z "$BRANCH" ]]; then
   BRANCH="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)"
@@ -40,7 +42,7 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   SYSTEMCTL="sudo systemctl"
 fi
 
-info "repoDir=$REPO_DIR branch=$BRANCH servicePrefix=$SERVICE_PREFIX"
+info "repoDir=$REPO_DIR branch=$BRANCH servicePrefix=$SERVICE_PREFIX buildHeapMb=$NODE_BUILD_MAX_OLD_SPACE_MB"
 
 info "updating source"
 git -C "$REPO_DIR" fetch origin
@@ -49,8 +51,8 @@ git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
 
 info "installing dependencies and building"
 bash -lc "cd '$REPO_DIR' && corepack pnpm install $PNPM_INSTALL_FLAG"
-bash -lc "cd '$REPO_DIR' && corepack pnpm --filter agent build"
-bash -lc "cd '$REPO_DIR' && corepack pnpm --filter watcher build"
+bash -lc "cd '$REPO_DIR' && NODE_OPTIONS='$BUILD_NODE_OPTIONS' corepack pnpm --filter agent build"
+bash -lc "cd '$REPO_DIR' && NODE_OPTIONS='$BUILD_NODE_OPTIONS' corepack pnpm --filter watcher build"
 
 info "running preflight"
 bash -lc "cd '$REPO_DIR' && bash scripts/vps/preflight-mainnet.sh"
