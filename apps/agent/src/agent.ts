@@ -28,7 +28,7 @@ import { createSimpleSmartAccount } from "./aa/smartAccount";
 import { applySuffix, buildDataSuffix, callDataHasSuffix } from "./builderCodes";
 import { createChainContext, validateStartup } from "./chain";
 import { loadConfig } from "./config";
-import { getSwapQuote } from "./dex";
+import { getSwapQuote, type SwapQuote } from "./dex";
 import { computeGasCostUsd, computeSwapCostUsd } from "./metrics";
 import {
   additionalDebtCapacityForTarget,
@@ -572,6 +572,20 @@ async function planFundEscrowAction(
   account: `0x${string}`,
   input: FundEscrowPlanInput
 ): Promise<PlannedAction> {
+  const quoteFailurePlan = (error: unknown): PlannedAction => {
+    const raw = error instanceof Error ? error.message : String(error);
+    const detail = raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+    return {
+      decision: "none",
+      calls: [],
+      swapCostUsd: 0n,
+      escrowPaymentUsdc: 0n,
+      topupAmountUsdc: 0n,
+      topupReason: input.reason,
+      summary: `${input.reason}: swap quote unavailable (${detail})`
+    };
+  };
+
   const harvestTransferSpec = billingProvider.transferSpec("harvest");
   if (input.targetUsdc <= 0n) {
     return {
@@ -622,30 +636,39 @@ async function planFundEscrowAction(
     };
   }
 
-  let quote = input.harvestMaxSafe
-    ? await getSwapQuote(config, {
+  let quote: SwapQuote;
+  try {
+    quote = input.harvestMaxSafe
+      ? await getSwapQuote(config, {
+          sellToken: config.wstEthAddress,
+          buyToken: config.usdcAddress,
+          sellAmount: maxSellWstEth,
+          slippageBps: config.slippageBps,
+          taker: account
+        })
+      : await getSwapQuote(config, {
+          sellToken: config.wstEthAddress,
+          buyToken: config.usdcAddress,
+          buyAmount: remainingUsdcNeeded,
+          slippageBps: config.slippageBps,
+          taker: account
+        });
+  } catch (error) {
+    return quoteFailurePlan(error);
+  }
+
+  if (quote.sellAmount > maxSellWstEth) {
+    try {
+      quote = await getSwapQuote(config, {
         sellToken: config.wstEthAddress,
         buyToken: config.usdcAddress,
         sellAmount: maxSellWstEth,
         slippageBps: config.slippageBps,
         taker: account
-      })
-    : await getSwapQuote(config, {
-        sellToken: config.wstEthAddress,
-        buyToken: config.usdcAddress,
-        buyAmount: remainingUsdcNeeded,
-        slippageBps: config.slippageBps,
-        taker: account
       });
-
-  if (quote.sellAmount > maxSellWstEth) {
-    quote = await getSwapQuote(config, {
-      sellToken: config.wstEthAddress,
-      buyToken: config.usdcAddress,
-      sellAmount: maxSellWstEth,
-      slippageBps: config.slippageBps,
-      taker: account
-    });
+    } catch (error) {
+      return quoteFailurePlan(error);
+    }
   }
 
   if (quote.sellAmount <= 0n || quote.buyAmount <= 0n) {
