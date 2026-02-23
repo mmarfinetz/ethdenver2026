@@ -1070,7 +1070,6 @@ export async function queryRecentRuns(): Promise<RecentRunsView> {
 
   const result = await Promise.all(
     runs
-      .filter((run) => run.userOp || run.decision === "topup-credits")
       .slice(-50)
       .map(async (run) => {
         const base: Omit<RecentRunView, "receiptStatus" | "userOpHash" | "txHash" | "blockNumber"> = {
