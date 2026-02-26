@@ -41,24 +41,44 @@ function cacheKeyRequest(key: string): Request {
   return new Request(`https://ssa-telemetry-cache.local/${encodeURIComponent(key)}`, { method: "GET" });
 }
 
-function telemetryCache(): Cache {
+type EdgeCacheLike = Pick<Cache, "match" | "put">;
+
+function telemetryCache(): EdgeCacheLike | null {
   const cacheStorage = caches as unknown as { default?: Cache };
-  if (!cacheStorage.default) {
-    throw new Error("Edge cache API unavailable");
+  return cacheStorage.default ?? null;
+}
+
+function memoryCache(): Map<string, string> {
+  const globalStore = globalThis as typeof globalThis & { __ssaTelemetryCacheMap?: Map<string, string> };
+  if (!globalStore.__ssaTelemetryCacheMap) {
+    globalStore.__ssaTelemetryCacheMap = new Map<string, string>();
   }
-  return cacheStorage.default;
+  return globalStore.__ssaTelemetryCacheMap;
 }
 
 async function readCachedText(key: string): Promise<string | null> {
   const cache = telemetryCache();
-  const match = await cache.match(cacheKeyRequest(key));
-  if (!match) return null;
-  return await match.text();
+  if (cache) {
+    try {
+      const match = await cache.match(cacheKeyRequest(key));
+      if (match) return await match.text();
+    } catch {
+      // fall back to in-memory cache
+    }
+  }
+  return memoryCache().get(key) ?? null;
 }
 
 async function writeCachedText(key: string, content: string): Promise<void> {
+  memoryCache().set(key, content);
+
   const cache = telemetryCache();
-  await cache.put(cacheKeyRequest(key), new Response(content, { headers: CACHE_BODY_HEADERS }));
+  if (!cache) return;
+  try {
+    await cache.put(cacheKeyRequest(key), new Response(content, { headers: CACHE_BODY_HEADERS }));
+  } catch {
+    // in-memory fallback is already updated
+  }
 }
 
 function parsePayload(value: unknown): CachePayload | null {
