@@ -44,7 +44,8 @@ function cacheKeyRequest(key: string): Request {
 type EdgeCacheLike = Pick<Cache, "match" | "put">;
 
 function telemetryCache(): EdgeCacheLike | null {
-  const cacheStorage = caches as unknown as { default?: Cache };
+  const cacheStorage = (globalThis as typeof globalThis & { caches?: { default?: Cache } }).caches;
+  if (!cacheStorage) return null;
   return cacheStorage.default ?? null;
 }
 
