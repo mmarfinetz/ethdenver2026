@@ -41,19 +41,23 @@ function cacheKeyRequest(key: string): Request {
   return new Request(`https://ssa-telemetry-cache.local/${encodeURIComponent(key)}`, { method: "GET" });
 }
 
-async function telemetryCache(): Promise<Cache> {
-  return caches.open("ssa-telemetry-v1");
+function telemetryCache(): Cache {
+  const cacheStorage = caches as unknown as { default?: Cache };
+  if (!cacheStorage.default) {
+    throw new Error("Edge cache API unavailable");
+  }
+  return cacheStorage.default;
 }
 
 async function readCachedText(key: string): Promise<string | null> {
-  const cache = await telemetryCache();
+  const cache = telemetryCache();
   const match = await cache.match(cacheKeyRequest(key));
   if (!match) return null;
   return await match.text();
 }
 
 async function writeCachedText(key: string, content: string): Promise<void> {
-  const cache = await telemetryCache();
+  const cache = telemetryCache();
   await cache.put(cacheKeyRequest(key), new Response(content, { headers: CACHE_BODY_HEADERS }));
 }
 
