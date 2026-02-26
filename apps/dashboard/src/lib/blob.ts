@@ -80,92 +80,12 @@ async function writeFilesystemFallbackText(key: string, content: string): Promis
   await writeFile(path, content, "utf8");
 }
 
-function logFallbackOnce(
-  action: "read" | "write",
-  key: string,
-  target: "edge-config" | "edge-cache" | "filesystem",
-  error: unknown
-): void {
+function logFallbackOnce(action: "read" | "write", key: string, target: "edge-cache" | "filesystem", error: unknown): void {
   if (loggedFallbackWarning) return;
   loggedFallbackWarning = true;
   const message = error instanceof Error ? error.message : String(error);
-  const destination =
-    target === "edge-config" ? "edge-config fallback" : target === "edge-cache" ? "edge cache fallback" : "/tmp fallback";
+  const destination = target === "edge-cache" ? "edge cache fallback" : "/tmp fallback";
   console.warn(`[telemetry] blob ${action} failed for ${key}; using ${destination} (${message.slice(0, 180)})`);
-}
-
-type EdgeConfigSettings = {
-  id: string;
-  token: string;
-};
-
-function edgeConfigSettings(): EdgeConfigSettings | null {
-  const id = process.env.TELEMETRY_EDGE_CONFIG_ID?.trim();
-  const token = process.env.TELEMETRY_VERCEL_API_TOKEN?.trim();
-  if (!id || !token) return null;
-  return { id, token };
-}
-
-function edgeConfigItemKey(key: string): string {
-  return key.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-async function readEdgeConfigText(key: string): Promise<string | null> {
-  const settings = edgeConfigSettings();
-  if (!settings) return null;
-  const itemKey = edgeConfigItemKey(key);
-
-  const response = await fetch(`https://api.vercel.com/v1/edge-config/${settings.id}/item/${encodeURIComponent(itemKey)}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${settings.token}`,
-      "cache-control": "no-store"
-    },
-    cache: "no-store"
-  });
-
-  if (response.status === 404) return null;
-  if (!response.ok) return null;
-
-  const payload = (await response.json()) as { value?: unknown };
-  return typeof payload.value === "string" ? payload.value : null;
-}
-
-async function writeEdgeConfigText(key: string, content: string): Promise<boolean> {
-  const settings = edgeConfigSettings();
-  if (!settings) return false;
-  const itemKey = edgeConfigItemKey(key);
-
-  const response = await fetch(`https://api.vercel.com/v1/edge-config/${settings.id}/items`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${settings.token}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      items: [
-        {
-          operation: "upsert",
-          key: itemKey,
-          value: content
-        }
-      ]
-    }),
-    cache: "no-store"
-  });
-
-  return response.ok;
-}
-
-async function appendEdgeConfigLine(key: string, line: string, maxLines: number): Promise<boolean> {
-  const settings = edgeConfigSettings();
-  if (!settings) return false;
-
-  const existing = await readEdgeConfigText(key);
-  const lines = existing ? existing.split("\n").filter(Boolean) : [];
-  lines.push(line);
-  const trimmed = lines.slice(-maxLines).join("\n") + "\n";
-  return writeEdgeConfigText(key, trimmed);
 }
 
 function telemetryCacheBaseUrl(): string | null {
@@ -242,9 +162,6 @@ async function appendEdgeCacheLine(key: string, line: string, maxLines: number):
 }
 
 async function readPreferredFallbackText(key: string): Promise<string | null> {
-  const edgeConfig = await readEdgeConfigText(key);
-  if (edgeConfig !== null) return edgeConfig;
-
   if (fallbackMode() === "edge-cache") {
     const cached = await readEdgeCacheText(key);
     if (cached !== null) return cached;
@@ -253,13 +170,11 @@ async function readPreferredFallbackText(key: string): Promise<string | null> {
 }
 
 async function writePreferredFallbackText(key: string, content: string): Promise<void> {
-  if (await writeEdgeConfigText(key, content)) return;
   if (fallbackMode() === "edge-cache" && (await writeEdgeCacheText(key, content))) return;
   await writeFilesystemFallbackText(key, content);
 }
 
 async function appendPreferredFallbackLine(key: string, line: string, maxLines: number): Promise<boolean> {
-  if (await appendEdgeConfigLine(key, line, maxLines)) return true;
   if (fallbackMode() === "edge-cache") {
     return appendEdgeCacheLine(key, line, maxLines);
   }
@@ -289,7 +204,7 @@ export async function writeBlobText(key: string, content: string): Promise<void>
   try {
     await putWithFallbackAccess(key, content);
   } catch (error) {
-    logFallbackOnce("write", key, edgeConfigSettings() ? "edge-config" : fallbackMode(), error);
+    logFallbackOnce("write", key, fallbackMode(), error);
     await writePreferredFallbackText(key, content);
   }
 }
@@ -320,7 +235,7 @@ export async function readBlobText(key: string): Promise<string | null> {
     return await response.text();
   } catch (error) {
     if (fallback !== null) {
-      logFallbackOnce("read", key, edgeConfigSettings() ? "edge-config" : fallbackMode(), error);
+      logFallbackOnce("read", key, fallbackMode(), error);
       return fallback;
     }
     return null;
