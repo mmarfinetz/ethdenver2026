@@ -14,7 +14,7 @@ import type {
   ChampionGateStatus,
   ComputeUrgency
 } from "@ssa/shared/types";
-import { valueToBigInt } from "@ssa/shared/utils";
+import { sanitizeSensitiveText, valueToBigInt } from "@ssa/shared/utils";
 import { readFile } from "node:fs/promises";
 import type { Hex, PublicClient } from "viem";
 import { readBlobText } from "./blob";
@@ -268,7 +268,7 @@ function parseOptionalBigInt(value: unknown): bigint | null {
 function parseOptionalText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 ? sanitizeSensitiveText(trimmed) : null;
 }
 
 function firstDefined<T>(values: Array<T | null | undefined>): T | null {
@@ -373,7 +373,7 @@ function parseRunLine(line: string): ParsedRun {
     topupAmountUsdc,
     fallbackWarning,
     status: payload.status === "ok" || payload.status === "skipped" ? payload.status : "error",
-    reason: typeof payload.reason === "string" ? payload.reason : undefined,
+    reason: parseOptionalText(payload.reason) ?? undefined,
     position: {
       totalCollateralBase: valueToBigInt(position.totalCollateralBase),
       totalDebtBase: valueToBigInt(position.totalDebtBase),
@@ -405,7 +405,9 @@ function parseRunLine(line: string): ParsedRun {
         economics.breakEvenEquityUsdApprox == null ? null : valueToBigInt(economics.breakEvenEquityUsdApprox),
       leverageWad: valueToBigInt(economics.leverageWad),
       gasPaymentUsdc: economics.gasPaymentUsdc == null ? null : valueToBigInt(economics.gasPaymentUsdc),
-      notes: Array.isArray(economics.notes) ? economics.notes.map(String) : []
+      notes: Array.isArray(economics.notes)
+        ? economics.notes.map((note) => sanitizeSensitiveText(String(note)))
+        : []
     },
     runway: runway
       ? {
@@ -424,7 +426,7 @@ function parseRunLine(line: string): ParsedRun {
       status: risk.status === "available" ? "available" : "unavailable",
       pLiq7d: typeof risk.pLiq7d === "number" ? risk.pLiq7d : undefined,
       pLiq30d: typeof risk.pLiq30d === "number" ? risk.pLiq30d : undefined,
-      notes: String(risk.notes ?? "")
+      notes: sanitizeSensitiveText(String(risk.notes ?? ""))
     },
     userOp: userOpPayload
       ? {
@@ -436,7 +438,7 @@ function parseRunLine(line: string): ParsedRun {
           callData: String(userOpPayload.callData) as Hex,
           callDataWithSuffix: String(userOpPayload.callDataWithSuffix) as Hex,
           builderSuffix: String(userOpPayload.builderSuffix) as Hex,
-          summary: String(userOpPayload.summary ?? ""),
+          summary: sanitizeSensitiveText(String(userOpPayload.summary ?? "")),
           timestamp: String(userOpPayload.timestamp ?? payload.timestamp)
         }
       : undefined,

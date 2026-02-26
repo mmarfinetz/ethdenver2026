@@ -6,7 +6,7 @@ import type {
   WstEthRateSample
 } from "@ssa/shared/types";
 import { BPS_DENOMINATOR, WETH_DECIMALS, WSTETH_DECIMALS } from "@ssa/shared/constants";
-import { formatToken, mulDiv, safeSub } from "@ssa/shared/utils";
+import { formatToken, mulDiv, safeSub, sanitizeSensitiveText } from "@ssa/shared/utils";
 import {
   callApprove,
   callBorrow,
@@ -83,6 +83,39 @@ type PlannedAction = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function sanitizeRunMessage(value: string): string {
+  return sanitizeSensitiveText(value);
+}
+
+function sanitizeRunRecord(record: AgentRunRecord): AgentRunRecord {
+  return {
+    ...record,
+    reason: record.reason ? sanitizeRunMessage(record.reason) : record.reason,
+    fallbackWarning: record.fallbackWarning ? sanitizeRunMessage(record.fallbackWarning) : record.fallbackWarning,
+    economics: {
+      ...record.economics,
+      notes: record.economics.notes.map((note) => sanitizeRunMessage(note))
+    },
+    risk: {
+      ...record.risk,
+      notes: sanitizeRunMessage(record.risk.notes)
+    },
+    userOp: record.userOp
+      ? {
+          ...record.userOp,
+          summary: sanitizeRunMessage(record.userOp.summary)
+        }
+      : undefined
+  };
+}
+
+async function persistRunRecord(path: string, record: AgentRunRecord): Promise<AgentRunRecord> {
+  const sanitized = sanitizeRunRecord(record);
+  await appendRunRecord(path, sanitized);
+  pushTelemetry("run", sanitized);
+  return sanitized;
 }
 
 function toWadPercentString(value: bigint): string {
@@ -574,7 +607,8 @@ async function planFundEscrowAction(
 ): Promise<PlannedAction> {
   const quoteFailurePlan = (error: unknown): PlannedAction => {
     const raw = error instanceof Error ? error.message : String(error);
-    const detail = raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+    const safeRaw = sanitizeRunMessage(raw);
+    const detail = safeRaw.length > 180 ? `${safeRaw.slice(0, 177)}...` : safeRaw;
     return {
       decision: "none",
       calls: [],
@@ -636,38 +670,45 @@ async function planFundEscrowAction(
     };
   }
 
-  let quote: SwapQuote;
-  try {
-    quote = input.harvestMaxSafe
-      ? await getSwapQuote(config, {
-          sellToken: config.wstEthAddress,
-          buyToken: config.usdcAddress,
-          sellAmount: maxSellWstEth,
-          slippageBps: config.slippageBps,
-          taker: account
-        })
-      : await getSwapQuote(config, {
-          sellToken: config.wstEthAddress,
-          buyToken: config.usdcAddress,
-          buyAmount: remainingUsdcNeeded,
-          slippageBps: config.slippageBps,
-          taker: account
-        });
-  } catch (error) {
-    return quoteFailurePlan(error);
-  }
+  const quoteBySellAmount = () =>
+    getSwapQuote(config, {
+      sellToken: config.wstEthAddress,
+      buyToken: config.usdcAddress,
+      sellAmount: maxSellWstEth,
+      slippageBps: config.slippageBps,
+      taker: account
+    });
 
-  if (quote.sellAmount > maxSellWstEth) {
+  let quote: SwapQuote;
+  if (input.harvestMaxSafe) {
+    try {
+      quote = await quoteBySellAmount();
+    } catch (error) {
+      return quoteFailurePlan(error);
+    }
+  } else {
     try {
       quote = await getSwapQuote(config, {
         sellToken: config.wstEthAddress,
         buyToken: config.usdcAddress,
-        sellAmount: maxSellWstEth,
+        buyAmount: remainingUsdcNeeded,
         slippageBps: config.slippageBps,
         taker: account
       });
     } catch (error) {
-      return quoteFailurePlan(error);
+      try {
+        quote = await quoteBySellAmount();
+      } catch (fallbackError) {
+        return quoteFailurePlan(fallbackError);
+      }
+    }
+
+    if (quote.sellAmount > maxSellWstEth) {
+      try {
+        quote = await quoteBySellAmount();
+      } catch (error) {
+        return quoteFailurePlan(error);
+      }
     }
   }
 
@@ -1105,10 +1146,9 @@ async function main(): Promise<void> {
             );
           }
         }
-        await appendRunRecord(config.runLogPath, runRecord);
-        pushTelemetry("run", runRecord);
+        runRecord = await persistRunRecord(config.runLogPath, runRecord);
         console.log(
-          `[run] skipped: ${planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
+          `[run] skipped: ${runRecord.reason ?? planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
         );
         return;
       }
@@ -1187,8 +1227,7 @@ async function main(): Promise<void> {
           }
         }
 
-        await appendRunRecord(config.runLogPath, runRecord);
-        pushTelemetry("run", runRecord);
+        runRecord = await persistRunRecord(config.runLogPath, runRecord);
         console.log(
           `[run] ${runRecord.status} decision=${planned.decision} topupStatus=${runRecord.topupStatus} topupAmount=${formatToken(runRecord.topupAmountUsdc, config.expectedDecimals.usdc)} runway=${toRunwayDaysString(finalRunway)}d urgency=${finalRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s`
         );
@@ -1214,10 +1253,9 @@ async function main(): Promise<void> {
             );
           }
         }
-        await appendRunRecord(config.runLogPath, runRecord);
-        pushTelemetry("run", runRecord);
+        runRecord = await persistRunRecord(config.runLogPath, runRecord);
         console.log(
-          `[run] skipped: ${planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
+          `[run] skipped: ${runRecord.reason ?? planned.summary} runway=${toRunwayDaysString(initialRunway)}d urgency=${initialRunway.urgency} nextInterval=${config.runIntervalSeconds * nextIntervalMultiplier}s samples=${storageBefore.samples.length}->${storageAfter.samples.length}`
         );
         return;
       }
@@ -1353,8 +1391,7 @@ async function main(): Promise<void> {
         };
       }
 
-      await appendRunRecord(config.runLogPath, runRecord);
-      pushTelemetry("run", runRecord);
+      runRecord = await persistRunRecord(config.runLogPath, runRecord);
 
       const aprLabel = apr ? toWadPercentString(apr) : "n/a";
       const gasLabel = gasPaymentUsdc !== null
@@ -1372,7 +1409,7 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (error) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = sanitizeRunMessage(error instanceof Error ? error.message : String(error));
   console.error("[fatal]", message);
 
   try {
@@ -1429,8 +1466,7 @@ main().catch(async (error) => {
       provenance: buildRuntimeProvenance()
     };
 
-    await appendRunRecord(config.runLogPath, fallbackRecord);
-    pushTelemetry("run", fallbackRecord);
+    await persistRunRecord(config.runLogPath, fallbackRecord);
   } catch {
     // ignore fallback logging failures
   }

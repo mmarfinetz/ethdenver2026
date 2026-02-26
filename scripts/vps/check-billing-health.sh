@@ -97,11 +97,23 @@ if (computeBurnUsdc <= 0n) {
 const recent = runs.slice(-windowRuns);
 const billingDecisions = new Set(["pay-escrow", "fund-escrow", "topup-credits"]);
 const successfulBillingRuns = recent.filter((run) => billingDecisions.has(run.decision) && run.status === "ok");
+const latestUrgency = String(last?.runway?.urgency ?? "unknown");
+
 if (successfulBillingRuns.length === 0) {
-  console.error(
-    `[billing-health:error] no successful billing decisions found in last ${recent.length} runs`
+  if (latestUrgency === "dead" || latestUrgency === "unknown") {
+    console.error(
+      `[billing-health:error] no successful billing decisions found in last ${recent.length} runs and latest runway urgency is ${latestUrgency}`
+    );
+    process.exit(1);
+  }
+
+  console.warn(
+    `[billing-health:warn] no successful billing decisions found in last ${recent.length} runs; latest runway urgency=${latestUrgency}`
   );
-  process.exit(1);
+  console.log(
+    `[billing-health] ok runs=${runs.length} latest=${last.timestamp} latestDecision=${last.decision} latestStatus=${last.status} latestComputeBurnUsdc=${computeBurnUsdc.toString()} lastBillingDecision=none lastBillingTimestamp=none`
+  );
+  process.exit(0);
 }
 
 const lastBilling = successfulBillingRuns[successfulBillingRuns.length - 1];

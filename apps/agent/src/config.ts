@@ -321,7 +321,7 @@ export function loadConfig(): AgentConfig {
     conwayApiBaseUrl,
     conwayApiKey: optionalEnv("CONWAY_API_KEY"),
     conwayCreditsBalancePath: process.env.CONWAY_CREDITS_BALANCE_PATH?.trim() || "/v1/credits/balance",
-    conwayCreditsTopupPath: process.env.CONWAY_CREDITS_TOPUP_PATH?.trim() || "/v1/credits/topup",
+    conwayCreditsTopupPath: process.env.CONWAY_CREDITS_TOPUP_PATH?.trim() || "/pay",
     conwayPaymentRecipientAddress: optionalAddress(
       process.env.CONWAY_PAYMENT_RECIPIENT_ADDRESS,
       "CONWAY_PAYMENT_RECIPIENT_ADDRESS"

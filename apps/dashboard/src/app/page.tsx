@@ -1,4 +1,11 @@
-import { ActivityTimeline, CopyableText, Sparkline, TerminalConsoleLive, type ActivityTimelineRow } from "./components";
+import {
+  ActivityTimeline,
+  AgentRunLogLive,
+  CopyableText,
+  Sparkline,
+  TerminalConsoleLive,
+  type ActivityTimelineRow
+} from "./components";
 import { fmt, fmtHf, fmtPercentWad, fmtShortHash } from "../lib/format";
 import { queryDashboardState, queryRecentRuns } from "../lib/queries";
 
@@ -213,6 +220,16 @@ export default async function HomePage() {
   const terminalErrorCount = runs.runs.filter((run) => run.status === "error").length;
   const terminalNetLabel = state.netCarryEstimateUsd == null ? "--" : fmt(state.netCarryEstimateUsd, 8, "USD");
   const terminalRunwayLabel = runwayDays === "--" ? "--" : `${runwayDays}d`;
+  const liveAgentRunLogs = runs.runs.map((run) => ({
+    timestamp: run.timestamp,
+    status: run.status,
+    decision: run.decision,
+    summary: run.summary,
+    userOpHash: run.userOpHash,
+    txHash: run.txHash,
+    receiptStatus: run.receiptStatus,
+    topupStatus: run.topupStatus
+  }));
 
   const latestExecutionTimestamp = activityRows[0]?.timestamp ?? state.freshness.latestRun;
   const lineageTimestamp = maxTimestamp(state.champion.lineage.flatMap((entry) => [entry.createdAt, entry.evaluatedAt]));
@@ -306,6 +323,8 @@ export default async function HomePage() {
           latestTimestamp: state.freshness.latestRun
         }}
       />
+
+      <AgentRunLogLive initialRuns={liveAgentRunLogs} />
 
       <section className="status-strip" aria-label="Critical status strip">
         <article className={`status-badge ${toneClass(healthFactorTone(state.position.healthFactor))}`}>

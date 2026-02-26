@@ -46,10 +46,10 @@
     },
     {
       "name": "rollback",
-      "command": "echo rollback >> \"/var/folders/v2/dbndjj356rzcs68w9pczqcpm0000gn/T/autopilot-deploy-si4Lsz/hooks.log\"",
+      "command": "echo rollback >> \"/var/folders/v2/dbndjj356rzcs68w9pczqcpm0000gn/T/autopilot-deploy-8Plt8J/hooks.log\"",
       "ok": true,
       "output": ""
     }
   ],
-  "generatedAt": "2026-02-21T16:40:39.605Z"
+  "generatedAt": "2026-02-21T18:13:52.562Z"
 }

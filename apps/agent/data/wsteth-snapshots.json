@@ -77,6 +77,534 @@
       "chainId": 84532,
       "blockNumber": "37961570",
       "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T16:53:08.267Z",
+      "chainId": 8453,
+      "blockNumber": "42451720",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T16:57:46.103Z",
+      "chainId": 8453,
+      "blockNumber": "42451859",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T16:58:49.967Z",
+      "chainId": 8453,
+      "blockNumber": "42451891",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:00:07.462Z",
+      "chainId": 8453,
+      "blockNumber": "42451930",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:01:57.467Z",
+      "chainId": 8453,
+      "blockNumber": "42451985",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:03:32.369Z",
+      "chainId": 8453,
+      "blockNumber": "42452032",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:11:35.466Z",
+      "chainId": 8453,
+      "blockNumber": "42452274",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:19:39.846Z",
+      "chainId": 8453,
+      "blockNumber": "42452516",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:24:46.916Z",
+      "chainId": 8453,
+      "blockNumber": "42452669",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:27:44.138Z",
+      "chainId": 8453,
+      "blockNumber": "42452758",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:28:11.218Z",
+      "chainId": 8453,
+      "blockNumber": "42452771",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:41:42.971Z",
+      "chainId": 8453,
+      "blockNumber": "42453177",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:48:46.389Z",
+      "chainId": 8453,
+      "blockNumber": "42453389",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T17:56:53.198Z",
+      "chainId": 8453,
+      "blockNumber": "42453635",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:05:14.985Z",
+      "chainId": 8453,
+      "blockNumber": "42453884",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:14:18.048Z",
+      "chainId": 8453,
+      "blockNumber": "42454155",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:26:39.875Z",
+      "chainId": 8453,
+      "blockNumber": "42454527",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:34:43.584Z",
+      "chainId": 8453,
+      "blockNumber": "42454768",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:42:45.329Z",
+      "chainId": 8453,
+      "blockNumber": "42455009",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:55:47.951Z",
+      "chainId": 8453,
+      "blockNumber": "42455400",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:56:31.885Z",
+      "chainId": 8453,
+      "blockNumber": "42455422",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:57:23.279Z",
+      "chainId": 8453,
+      "blockNumber": "42455448",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T18:58:31.394Z",
+      "chainId": 8453,
+      "blockNumber": "42455482",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T19:06:43.104Z",
+      "chainId": 8453,
+      "blockNumber": "42455728",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-21T19:37:34.857Z",
+      "chainId": 8453,
+      "blockNumber": "42456653",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-23T22:09:14.533Z",
+      "chainId": 8453,
+      "blockNumber": "42547603",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-23T22:17:15.449Z",
+      "chainId": 8453,
+      "blockNumber": "42547844",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T18:28:44.875Z",
+      "chainId": 8453,
+      "blockNumber": "42627388",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T18:36:48.529Z",
+      "chainId": 8453,
+      "blockNumber": "42627630",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T18:44:52.531Z",
+      "chainId": 8453,
+      "blockNumber": "42627872",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T18:52:56.654Z",
+      "chainId": 8453,
+      "blockNumber": "42628114",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T18:56:57.621Z",
+      "chainId": 8453,
+      "blockNumber": "42628235",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:00:58.520Z",
+      "chainId": 8453,
+      "blockNumber": "42628355",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:04:59.422Z",
+      "chainId": 8453,
+      "blockNumber": "42628476",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:09:00.214Z",
+      "chainId": 8453,
+      "blockNumber": "42628596",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:13:01.067Z",
+      "chainId": 8453,
+      "blockNumber": "42628717",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:17:01.824Z",
+      "chainId": 8453,
+      "blockNumber": "42628837",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:21:02.581Z",
+      "chainId": 8453,
+      "blockNumber": "42628957",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:25:03.468Z",
+      "chainId": 8453,
+      "blockNumber": "42629078",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:29:04.533Z",
+      "chainId": 8453,
+      "blockNumber": "42629198",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:33:05.413Z",
+      "chainId": 8453,
+      "blockNumber": "42629319",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:37:06.320Z",
+      "chainId": 8453,
+      "blockNumber": "42629439",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:41:08.108Z",
+      "chainId": 8453,
+      "blockNumber": "42629560",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:45:09.119Z",
+      "chainId": 8453,
+      "blockNumber": "42629680",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:49:31.262Z",
+      "chainId": 8453,
+      "blockNumber": "42629811",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:53:35.549Z",
+      "chainId": 8453,
+      "blockNumber": "42629934",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T19:57:39.478Z",
+      "chainId": 8453,
+      "blockNumber": "42630056",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:01:43.396Z",
+      "chainId": 8453,
+      "blockNumber": "42630178",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:05:47.717Z",
+      "chainId": 8453,
+      "blockNumber": "42630300",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:09:51.734Z",
+      "chainId": 8453,
+      "blockNumber": "42630422",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:13:55.598Z",
+      "chainId": 8453,
+      "blockNumber": "42630544",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:17:59.840Z",
+      "chainId": 8453,
+      "blockNumber": "42630666",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:22:03.819Z",
+      "chainId": 8453,
+      "blockNumber": "42630788",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:26:07.766Z",
+      "chainId": 8453,
+      "blockNumber": "42630910",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:30:11.516Z",
+      "chainId": 8453,
+      "blockNumber": "42631032",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:34:15.953Z",
+      "chainId": 8453,
+      "blockNumber": "42631154",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:38:19.671Z",
+      "chainId": 8453,
+      "blockNumber": "42631276",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:42:23.506Z",
+      "chainId": 8453,
+      "blockNumber": "42631398",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:46:27.164Z",
+      "chainId": 8453,
+      "blockNumber": "42631519",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:50:31.158Z",
+      "chainId": 8453,
+      "blockNumber": "42631641",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T20:54:34.591Z",
+      "chainId": 8453,
+      "blockNumber": "42631763",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:01:03.378Z",
+      "chainId": 8453,
+      "blockNumber": "42631957",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:09:06.333Z",
+      "chainId": 8453,
+      "blockNumber": "42632199",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:17:09.499Z",
+      "chainId": 8453,
+      "blockNumber": "42632441",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:24:03.389Z",
+      "chainId": 8453,
+      "blockNumber": "42632648",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:25:12.367Z",
+      "chainId": 8453,
+      "blockNumber": "42632682",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:33:15.401Z",
+      "chainId": 8453,
+      "blockNumber": "42632924",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:41:18.700Z",
+      "chainId": 8453,
+      "blockNumber": "42633165",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:49:21.694Z",
+      "chainId": 8453,
+      "blockNumber": "42633407",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T21:57:24.828Z",
+      "chainId": 8453,
+      "blockNumber": "42633648",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:04:05.276Z",
+      "chainId": 8453,
+      "blockNumber": "42633848",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:05:27.952Z",
+      "chainId": 8453,
+      "blockNumber": "42633890",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:09:31.656Z",
+      "chainId": 8453,
+      "blockNumber": "42634012",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:13:29.670Z",
+      "chainId": 8453,
+      "blockNumber": "42634131",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:17:31.536Z",
+      "chainId": 8453,
+      "blockNumber": "42634252",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:17:33.309Z",
+      "chainId": 8453,
+      "blockNumber": "42634253",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:21:33.303Z",
+      "chainId": 8453,
+      "blockNumber": "42634373",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:21:34.985Z",
+      "chainId": 8453,
+      "blockNumber": "42634373",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:25:36.324Z",
+      "chainId": 8453,
+      "blockNumber": "42634494",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:25:46.536Z",
+      "chainId": 8453,
+      "blockNumber": "42634499",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:29:38.284Z",
+      "chainId": 8453,
+      "blockNumber": "42634615",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:29:48.209Z",
+      "chainId": 8453,
+      "blockNumber": "42634620",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:50:28.157Z",
+      "chainId": 8453,
+      "blockNumber": "42635240",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:50:37.849Z",
+      "chainId": 8453,
+      "blockNumber": "42635245",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:54:30.869Z",
+      "chainId": 8453,
+      "blockNumber": "42635361",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:54:40.242Z",
+      "chainId": 8453,
+      "blockNumber": "42635366",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:58:33.492Z",
+      "chainId": 8453,
+      "blockNumber": "42635483",
+      "wstEthPerToken": "1000000000000000000"
+    },
+    {
+      "timestamp": "2026-02-25T22:58:42.711Z",
+      "chainId": 8453,
+      "blockNumber": "42635487",
+      "wstEthPerToken": "1000000000000000000"
     }
   ]
 }

@@ -1,0 +1,10 @@
+{
+  "samples": [
+    {
+      "timestamp": "2026-02-21T17:19:31.695Z",
+      "chainId": 84532,
+      "blockNumber": "37963041",
+      "wstEthPerToken": "1000000000000000000"
+    }
+  ]
+}

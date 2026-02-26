@@ -118,6 +118,34 @@ export function jsonReplacer(_key: string, value: unknown): unknown {
   return value;
 }
 
+/**
+ * Redacts common secret-bearing substrings before logging or rendering text.
+ * This is a best-effort guardrail and should be applied to untrusted error text.
+ */
+export function sanitizeSensitiveText(value: string): string {
+  let output = value;
+
+  // Hide common API-key path patterns (Alchemy/Infura-like URLs).
+  output = output.replace(/(https?:\/\/[^\s/]+\/v[23]\/)([A-Za-z0-9_-]+)/gi, "$1[REDACTED]");
+
+  // Hide sensitive query params.
+  output = output.replace(
+    /([?&](?:api[_-]?key|key|token|access[_-]?token|client[_-]?secret|secret|auth|authorization)=)([^&\s]+)/gi,
+    "$1[REDACTED]"
+  );
+
+  // Hide bearer tokens in free-form text.
+  output = output.replace(/(Bearer\s+)([A-Za-z0-9._~+/-]+=*)/gi, "$1[REDACTED]");
+
+  // Hide env-style assignments (e.g. API_KEY=abc123).
+  output = output.replace(
+    /((?:^|[\s,;])(?:[A-Z0-9_]*(?:API|TOKEN|SECRET|KEY)[A-Z0-9_]*=))([^\s,;]+)/g,
+    "$1[REDACTED]"
+  );
+
+  return output;
+}
+
 export function parseSalt(raw: string): bigint {
   if (raw.startsWith("0x")) return BigInt(raw);
   return BigInt(parseInteger(raw, "SMART_ACCOUNT_SALT"));

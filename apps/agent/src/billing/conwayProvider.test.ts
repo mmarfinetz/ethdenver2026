@@ -125,25 +125,40 @@ test("ConwayBillingProvider falls back to escrow balance when API read fails and
 });
 
 test("ConwayBillingProvider retries topup with signed EIP-3009 payload after HTTP 402", async () => {
-  const config = makeConfig();
+  const config = makeConfig({ conwayCreditsTopupPath: "/pay" });
   const provider = new ConwayBillingProvider(config);
   const originalFetch = globalThis.fetch;
-  const requests: Array<{ url: string; headers: Headers }> = [];
+  const requests: Array<{ url: string; headers: Headers; method: string | undefined }> = [];
 
   globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
     const [input, init] = args;
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const headers = new Headers(init?.headers);
-    requests.push({ url, headers });
+    requests.push({ url, headers, method: init?.method });
 
-    if (requests.length === 1) {
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }, { amount: 100 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    const expectedTopupUrl = `https://api.conway.test/pay/25/${config.conwayPayerAddress}`;
+    if (url === expectedTopupUrl && requests.filter((request) => request.url === expectedTopupUrl).length === 1) {
       return new Response(
         JSON.stringify({
           paymentHeaderName: config.conwayX402HeaderName,
           requirementId: "req-402",
           transferWithAuthorization: {
             to: config.conwayPaymentRecipientAddress,
-            value: "12345",
+            value: "25000000",
             validAfter: "0",
             validBefore: "4102444800",
             nonce: `0x${"11".repeat(32)}`,
@@ -160,10 +175,12 @@ test("ConwayBillingProvider retries topup with signed EIP-3009 payload after HTT
       );
     }
 
+    assert.equal(url, expectedTopupUrl);
+    assert.equal(init?.method, "GET");
+
     const paymentHeader = headers.get(config.conwayX402HeaderName);
     assert.equal(typeof paymentHeader, "string");
     assert.equal((paymentHeader ?? "").length > 0, true);
-
     const decoded = JSON.parse(Buffer.from(paymentHeader as string, "base64").toString("utf8")) as Record<string, unknown>;
     assert.equal(decoded.type, "eip3009");
     assert.equal(decoded.requirementId, "req-402");
@@ -172,7 +189,7 @@ test("ConwayBillingProvider retries topup with signed EIP-3009 payload after HTT
     return new Response(
       JSON.stringify({
         topup: {
-          creditedUsdc: "12345"
+          creditedUsdc: "25000000"
         }
       }),
       {
@@ -185,12 +202,325 @@ test("ConwayBillingProvider retries topup with signed EIP-3009 payload after HTT
   }) as typeof fetch;
 
   try {
-    const result = await provider.topUpCredits(12_345n, "test topup");
+    const result = await provider.topUpCredits(25_000_000n, "test topup");
     assert.equal(result.status, "ok");
-    assert.equal(result.amountUsdc, 12_345n);
-    assert.equal(requests.length, 2);
-    assert.equal(requests[0]?.headers.get(config.conwayX402HeaderName), null);
-    assert.equal((requests[1]?.headers.get(config.conwayX402HeaderName) ?? "").length > 0, true);
+    assert.equal(result.amountUsdc, 25_000_000n);
+    assert.equal(requests.length, 3);
+    assert.equal(requests[0]?.url.endsWith("/v1/credits/pricing"), true);
+    assert.equal(requests[1]?.headers.get(config.conwayX402HeaderName), null);
+    assert.equal((requests[2]?.headers.get(config.conwayX402HeaderName) ?? "").length > 0, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ConwayBillingProvider retries /pay topup for x402 v2 accepts challenge", async () => {
+  const config = makeConfig({ conwayCreditsTopupPath: "/pay" });
+  const provider = new ConwayBillingProvider(config);
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers; method: string | undefined }> = [];
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input, init] = args;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const headers = new Headers(init?.headers);
+    requests.push({ url, headers, method: init?.method });
+
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }, { amount: 100 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    const expectedTopupUrl = `https://api.conway.test/pay/25/${config.conwayPayerAddress}`;
+    if (url === expectedTopupUrl && requests.filter((request) => request.url === expectedTopupUrl).length === 1) {
+      return new Response(
+        JSON.stringify({
+          x402Version: 2,
+          accepts: [
+            {
+              scheme: "exact",
+              network: "eip155:8453",
+              maxAmountRequired: "25000000",
+              payTo: config.conwayPaymentRecipientAddress,
+              asset: config.usdcAddress,
+              maxTimeoutSeconds: 30
+            }
+          ]
+        }),
+        {
+          status: 402,
+          headers: {
+            "content-type": "application/json",
+            "x-payment-required": "true"
+          }
+        }
+      );
+    }
+
+    assert.equal(url, expectedTopupUrl);
+    assert.equal(init?.method, "GET");
+
+    const paymentHeader = headers.get(config.conwayX402HeaderName);
+    assert.equal(typeof paymentHeader, "string");
+    assert.equal((paymentHeader ?? "").length > 0, true);
+    const decoded = JSON.parse(Buffer.from(paymentHeader as string, "base64").toString("utf8")) as Record<string, unknown>;
+    assert.equal(decoded.scheme, "exact");
+    assert.equal(decoded.network, "eip155:8453");
+
+    const payload = decoded.payload as Record<string, unknown>;
+    const authorization = payload.authorization as Record<string, unknown>;
+    assert.equal(String(authorization.to).toLowerCase(), String(config.conwayPaymentRecipientAddress).toLowerCase());
+    assert.equal(String(authorization.value), "25000000");
+    assert.equal(typeof payload.signature, "string");
+
+    return new Response(
+      JSON.stringify({
+        topup: {
+          creditedUsdc: "25000000"
+        }
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      }
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await provider.topUpCredits(25_000_000n, "x402 v2");
+    assert.equal(result.status, "ok");
+    assert.equal(result.amountUsdc, 25_000_000n);
+    assert.equal(requests.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ConwayBillingProvider resolves credits recipient from /v1/auth/me when API key is configured", async () => {
+  const discoveredRecipient = "0x0000000000000000000000000000000000000009";
+  const config = makeConfig({
+    conwayCreditsTopupPath: "/pay",
+    conwayApiKey: "test-key"
+  });
+  const provider = new ConwayBillingProvider(config);
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers }> = [];
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input, init] = args;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const headers = new Headers(init?.headers);
+    requests.push({ url, headers });
+
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (url.endsWith("/v1/auth/me")) {
+      return new Response(
+        JSON.stringify({
+          user: {
+            wallet_address: discoveredRecipient
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    const expectedTopupUrl = `https://api.conway.test/pay/25/${discoveredRecipient}`;
+    if (url === expectedTopupUrl && headers.get(config.conwayX402HeaderName) == null) {
+      return new Response(
+        JSON.stringify({
+          paymentHeaderName: config.conwayX402HeaderName,
+          requirementId: "req-discovered-recipient",
+          transferWithAuthorization: {
+            to: config.conwayPaymentRecipientAddress,
+            value: "25000000",
+            validAfter: "0",
+            validBefore: "4102444800",
+            nonce: `0x${"33".repeat(32)}`,
+            token: config.usdcAddress,
+            chainId: config.chainId
+          }
+        }),
+        {
+          status: 402,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (url === expectedTopupUrl && headers.get(config.conwayX402HeaderName) != null) {
+      return new Response(
+        JSON.stringify({
+          topup: {
+            creditedUsdc: "25000000"
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    return new Response("unexpected request", { status: 500 });
+  }) as typeof fetch;
+
+  try {
+    const result = await provider.topUpCredits(25_000_000n, "discover recipient");
+    assert.equal(result.status, "ok");
+    assert.equal(result.amountUsdc, 25_000_000n);
+    assert.equal(requests.some((request) => request.url.endsWith("/v1/auth/me")), true);
+    assert.equal(requests.some((request) => request.url.includes(`/pay/25/${discoveredRecipient}`)), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ConwayBillingProvider falls back to canonical /pay topup route when legacy path returns 404", async () => {
+  const config = makeConfig({ conwayCreditsTopupPath: "/v1/credits/topup" });
+  const provider = new ConwayBillingProvider(config);
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers }> = [];
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input, init] = args;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const headers = new Headers(init?.headers);
+    requests.push({ url, headers });
+
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }, { amount: 100 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (url.endsWith("/v1/credits/topup")) {
+      return new Response("404 Not Found", { status: 404 });
+    }
+
+    const expectedTopupUrl = `https://api.conway.test/pay/25/${config.conwayPayerAddress}`;
+    if (url === expectedTopupUrl && headers.get(config.conwayX402HeaderName) == null) {
+      return new Response(
+        JSON.stringify({
+          paymentHeaderName: config.conwayX402HeaderName,
+          requirementId: "req-legacy-fallback",
+          transferWithAuthorization: {
+            to: config.conwayPaymentRecipientAddress,
+            value: "25000000",
+            validAfter: "0",
+            validBefore: "4102444800",
+            nonce: `0x${"22".repeat(32)}`,
+            token: config.usdcAddress,
+            chainId: config.chainId
+          }
+        }),
+        {
+          status: 402,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (url === expectedTopupUrl && headers.get(config.conwayX402HeaderName) != null) {
+      return new Response(
+        JSON.stringify({
+          topup: {
+            creditedUsdc: "25000000"
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    return new Response("unexpected request", { status: 500 });
+  }) as typeof fetch;
+
+  try {
+    const result = await provider.topUpCredits(25_000_000n, "legacy fallback");
+    assert.equal(result.status, "ok");
+    assert.equal(result.amountUsdc, 25_000_000n);
+    assert.equal(requests.some((request) => request.url.endsWith("/v1/credits/topup")), true);
+    assert.equal(requests.some((request) => request.url.includes("/pay/25/")), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ConwayBillingProvider skips pay topup when requested amount is below minimum tier", async () => {
+  const config = makeConfig({ conwayCreditsTopupPath: "/pay" });
+  const provider = new ConwayBillingProvider(config);
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input] = args;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+    return new Response("unexpected request", { status: 500 });
+  }) as typeof fetch;
+
+  try {
+    const result = await provider.topUpCredits(4_000_000n, "below minimum");
+    assert.equal(result.status, "skipped");
+    assert.equal(result.amountUsdc, 0n);
   } finally {
     globalThis.fetch = originalFetch;
   }
