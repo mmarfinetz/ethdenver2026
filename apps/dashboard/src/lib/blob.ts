@@ -3,17 +3,24 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-type TelemetryStorageMode = "auto" | "blob" | "filesystem";
+type TelemetryStorageMode = "auto" | "blob" | "filesystem" | "edge-cache";
 
 type BlobAccessMode = "public" | "private";
 
 const TELEMETRY_FALLBACK_ROOT = join(tmpdir(), "ssa-telemetry");
+const TELEMETRY_CACHE_PATH = "/api/telemetry-cache";
 let loggedFallbackWarning = false;
 
 function storageMode(): TelemetryStorageMode {
   const raw = process.env.TELEMETRY_STORAGE_MODE?.trim().toLowerCase();
-  if (raw === "blob" || raw === "filesystem") return raw;
+  if (raw === "blob" || raw === "filesystem" || raw === "edge-cache") return raw;
   return "auto";
+}
+
+function fallbackMode(): Exclude<TelemetryStorageMode, "blob" | "auto"> {
+  const mode = storageMode();
+  if (mode === "filesystem" || mode === "edge-cache") return mode;
+  return process.env.VERCEL ? "edge-cache" : "filesystem";
 }
 
 function configuredAccessMode(): BlobAccessMode {
@@ -59,7 +66,7 @@ function fallbackPath(key: string): string {
   return join(TELEMETRY_FALLBACK_ROOT, key);
 }
 
-async function readFallbackText(key: string): Promise<string | null> {
+async function readFilesystemFallbackText(key: string): Promise<string | null> {
   try {
     return await readFile(fallbackPath(key), "utf8");
   } catch {
@@ -67,17 +74,111 @@ async function readFallbackText(key: string): Promise<string | null> {
   }
 }
 
-async function writeFallbackText(key: string, content: string): Promise<void> {
+async function writeFilesystemFallbackText(key: string, content: string): Promise<void> {
   const path = fallbackPath(key);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
 }
 
-function logFallbackOnce(action: "read" | "write", key: string, error: unknown): void {
+function logFallbackOnce(action: "read" | "write", key: string, target: "edge-cache" | "filesystem", error: unknown): void {
   if (loggedFallbackWarning) return;
   loggedFallbackWarning = true;
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[telemetry] blob ${action} failed for ${key}; using /tmp fallback (${message.slice(0, 180)})`);
+  const destination = target === "edge-cache" ? "edge cache fallback" : "/tmp fallback";
+  console.warn(`[telemetry] blob ${action} failed for ${key}; using ${destination} (${message.slice(0, 180)})`);
+}
+
+function telemetryCacheBaseUrl(): string | null {
+  const explicit = process.env.TELEMETRY_CACHE_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) return `https://${vercelUrl}`;
+  return null;
+}
+
+function telemetryCacheHeaders(): HeadersInit | null {
+  const secret = process.env.INGEST_SECRET?.trim();
+  if (!secret) return null;
+  return {
+    "content-type": "application/json",
+    Authorization: `Bearer ${secret}`
+  };
+}
+
+function telemetryCacheUrl(key: string): string | null {
+  const base = telemetryCacheBaseUrl();
+  if (!base) return null;
+  return `${base}${TELEMETRY_CACHE_PATH}?key=${encodeURIComponent(key)}`;
+}
+
+async function readEdgeCacheText(key: string): Promise<string | null> {
+  const url = telemetryCacheUrl(key);
+  const headers = telemetryCacheHeaders();
+  if (!url || !headers) return null;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      ...headers,
+      "cache-control": "no-store"
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) return null;
+
+  const payload = (await response.json()) as { content?: unknown };
+  return typeof payload.content === "string" ? payload.content : null;
+}
+
+async function writeEdgeCacheText(key: string, content: string): Promise<boolean> {
+  const url = telemetryCacheUrl(key);
+  const headers = telemetryCacheHeaders();
+  if (!url || !headers) return false;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ op: "write", key, content }),
+    cache: "no-store"
+  });
+
+  return response.ok;
+}
+
+async function appendEdgeCacheLine(key: string, line: string, maxLines: number): Promise<boolean> {
+  const url = telemetryCacheUrl(key);
+  const headers = telemetryCacheHeaders();
+  if (!url || !headers) return false;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ op: "append", key, line, maxLines }),
+    cache: "no-store"
+  });
+
+  return response.ok;
+}
+
+async function readPreferredFallbackText(key: string): Promise<string | null> {
+  if (fallbackMode() === "edge-cache") {
+    const cached = await readEdgeCacheText(key);
+    if (cached !== null) return cached;
+  }
+  return readFilesystemFallbackText(key);
+}
+
+async function writePreferredFallbackText(key: string, content: string): Promise<void> {
+  if (fallbackMode() === "edge-cache" && (await writeEdgeCacheText(key, content))) return;
+  await writeFilesystemFallbackText(key, content);
+}
+
+async function appendPreferredFallbackLine(key: string, line: string, maxLines: number): Promise<boolean> {
+  if (fallbackMode() === "edge-cache") {
+    return appendEdgeCacheLine(key, line, maxLines);
+  }
+  return false;
 }
 
 function blobAuthHeaders(): HeadersInit | undefined {
@@ -91,15 +192,20 @@ function blobAuthHeaders(): HeadersInit | undefined {
  */
 export async function writeBlobText(key: string, content: string): Promise<void> {
   if (storageMode() === "filesystem") {
-    await writeFallbackText(key, content);
+    await writeFilesystemFallbackText(key, content);
+    return;
+  }
+
+  if (storageMode() === "edge-cache") {
+    await writePreferredFallbackText(key, content);
     return;
   }
 
   try {
     await putWithFallbackAccess(key, content);
   } catch (error) {
-    logFallbackOnce("write", key, error);
-    await writeFallbackText(key, content);
+    logFallbackOnce("write", key, fallbackMode(), error);
+    await writePreferredFallbackText(key, content);
   }
 }
 
@@ -108,8 +214,9 @@ export async function writeBlobText(key: string, content: string): Promise<void>
  * Returns null if the blob does not exist.
  */
 export async function readBlobText(key: string): Promise<string | null> {
-  const fallback = await readFallbackText(key);
+  const fallback = await readPreferredFallbackText(key);
   if (storageMode() === "filesystem") return fallback;
+  if (storageMode() === "edge-cache") return fallback;
 
   try {
     const info = await head(key);
@@ -128,7 +235,7 @@ export async function readBlobText(key: string): Promise<string | null> {
     return await response.text();
   } catch (error) {
     if (fallback !== null) {
-      logFallbackOnce("read", key, error);
+      logFallbackOnce("read", key, fallbackMode(), error);
       return fallback;
     }
     return null;
@@ -140,6 +247,11 @@ export async function readBlobText(key: string): Promise<string | null> {
  * Creates the blob if it doesn't exist.
  */
 export async function appendBlobLine(key: string, line: string, maxLines = 500): Promise<void> {
+  if (storageMode() === "edge-cache") {
+    const appended = await appendPreferredFallbackLine(key, line, maxLines);
+    if (appended) return;
+  }
+
   const existing = await readBlobText(key);
   const lines = existing
     ? existing.split("\n").filter(Boolean)
