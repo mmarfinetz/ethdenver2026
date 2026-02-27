@@ -508,7 +508,7 @@ function getStatusMessage(state: AgentState, time: number): string {
   if (r.decision === "delever") return "Delevering position.";
   if (r.decision === "fund-escrow") return "Funding escrow.";
   if (r.decision === "pay-escrow") return "Paying escrow.";
-  if (r.decision === "topup-credits") return "Topping up Conway credits.";
+  if (r.decision === "topup-credits") return "Topping up API credits.";
 
   const pool = getIdlePool(state);
   if (pool.length === 0) return "Systems nominal.";

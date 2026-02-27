@@ -148,7 +148,9 @@ function toRunReceiptStatus(status: string, receiptStatus: string, topupStatus: 
 
 function fundingSourceLabel(source: string | null): string {
   if (source === "escrow-fallback") return "escrow (fallback)";
-  return source === "conway-credits" ? "conway-credits" : "escrow";
+  if (source === "conway-credits") return "conway-credits";
+  if (source === "alchemy-credits") return "alchemy-credits";
+  return "escrow";
 }
 
 function formatTopupActivitySummary(run: RecentRunItem, usdcDecimals: number): string {
@@ -166,10 +168,10 @@ export default async function HomePage() {
   const nowMs = Date.now();
 
   const runwayDays = state.liveRunwayDaysWad == null ? "--" : (Number(state.liveRunwayDaysWad) / 1e18).toFixed(2);
-  const isConwayCredits = state.fundingSource === "conway-credits";
+  const isApiCredits = state.fundingSource === "conway-credits" || state.fundingSource === "alchemy-credits";
   const activeFundingSource = fundingSourceLabel(state.fundingSource);
-  const sourceBalanceLabel = isConwayCredits ? "Conway Credits Balance" : "Escrow Balance";
-  const sourceBalanceUsdc = isConwayCredits ? (state.creditBalanceUsdc ?? state.escrowBalanceUsdc) : state.escrowBalanceUsdc;
+  const sourceBalanceLabel = isApiCredits ? "API Credits Balance" : "Escrow Balance";
+  const sourceBalanceUsdc = isApiCredits ? (state.creditBalanceUsdc ?? state.escrowBalanceUsdc) : state.escrowBalanceUsdc;
   const latestTopupTimestamp = runs.runs.find((run) => run.decision === "topup-credits")?.timestamp ?? null;
 
   const smartAccountLabel = state.champion.basenames.smartAccount?.basename ?? fmtShortHash(state.smartAccountAddress);
@@ -447,8 +449,8 @@ export default async function HomePage() {
           <div className="staleness-row">
             {renderStalenessChip("runway snapshot", state.freshness.dashboard)}
             {renderStalenessChip(
-              isConwayCredits ? "latest topup" : "latest payment",
-              isConwayCredits ? latestTopupTimestamp : state.escrowPayments[0]?.timestamp ?? null
+              isApiCredits ? "latest topup" : "latest payment",
+              isApiCredits ? latestTopupTimestamp : state.escrowPayments[0]?.timestamp ?? null
             )}
           </div>
         </div>

@@ -1,19 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { erc20Abi } from "@ssa/shared/abis";
 import type { AgentConfig } from "../config";
-import { decodeFunctionData } from "viem";
-import { createComputeBillingProvider } from "./index";
 import { AlchemyBillingProvider } from "./alchemyProvider";
-import { ConwayBillingProvider } from "./conwayProvider";
-import { EscrowBillingProvider } from "./escrowProvider";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     chainId: 8453,
     dryRun: true,
     allowTestnet: false,
-    computeBillingMode: "escrow",
+    computeBillingMode: "alchemy",
     baseRpcUrl: "https://mainnet.base.org",
     bundlerRpcUrl: "https://public.pimlico.io/v2/8453/rpc",
     paymasterRpcUrl: undefined,
@@ -45,15 +40,15 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     dexRouterAddress: "0x0000000000000000000000000000000000000006",
     zrxApiUrl: "https://base.api.0x.org/swap/allowance-holder/quote",
     zrxApiKey: undefined,
-    conwayApiBaseUrl: "https://api.conway.test",
-    conwayApiKey: undefined,
+    conwayApiBaseUrl: "https://api.g.alchemy.com",
+    conwayApiKey: "alchemy-key",
     conwayCreditsBalancePath: "/v1/credits/balance",
-    conwayCreditsTopupPath: "/v1/credits/topup",
+    conwayCreditsTopupPath: "/pay",
     conwayPaymentRecipientAddress: "0x0000000000000000000000000000000000000007",
     conwayPayerAddress: "0x0000000000000000000000000000000000000008",
     conwayX402Enabled: true,
     conwayPayerPrivateKey: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    conwayX402HeaderName: "x-payment",
+    conwayX402HeaderName: "payment-signature",
     conwayFallbackToEscrowOnError: true,
     conwayCreditsMinBalanceUsdc: 10_000_000n,
     conwayCreditsTargetBalanceUsdc: 50_000_000n,
@@ -78,43 +73,29 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   };
 }
 
-test("createComputeBillingProvider returns escrow provider by default", () => {
-  const provider = createComputeBillingProvider(makeConfig());
-  assert.equal(provider instanceof EscrowBillingProvider, true);
-  assert.equal(provider.mode, "escrow");
-});
+test("AlchemyBillingProvider remaps credits funding source and labels", async () => {
+  const provider = new AlchemyBillingProvider(makeConfig());
+  const originalFetch = globalThis.fetch;
 
-test("createComputeBillingProvider returns conway provider in conway mode", () => {
-  const provider = createComputeBillingProvider(makeConfig({ computeBillingMode: "conway" }));
-  assert.equal(provider instanceof ConwayBillingProvider, true);
-  assert.equal(provider.mode, "conway");
-});
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ credits: { balanceUsdc: "12340000" } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    })) as typeof fetch;
 
-test("createComputeBillingProvider returns alchemy provider in alchemy mode", () => {
-  const provider = createComputeBillingProvider(makeConfig({ computeBillingMode: "alchemy" }));
-  assert.equal(provider instanceof AlchemyBillingProvider, true);
-  assert.equal(provider.mode, "alchemy");
-});
-
-test("EscrowBillingProvider parity: decisions, balance read, and transfer call", async () => {
-  const config = makeConfig();
-  const provider = new EscrowBillingProvider();
-
-  assert.deepEqual(await provider.readRunwayBalanceUsdc({ escrowUsdc: 42n }), {
-    creditBalanceUsdc: 42n,
-    fundingSource: "escrow"
-  });
-  assert.deepEqual(provider.transferSpec("routine"), { decision: "pay-escrow", recipientLabel: "escrow" });
-  assert.deepEqual(provider.transferSpec("harvest"), { decision: "fund-escrow", recipientLabel: "escrow" });
-
-  const transferCall = provider.buildTopupTransferCall(config, 123_456n);
-  assert.equal(transferCall.to, config.usdcAddress);
-
-  const decoded = decodeFunctionData({
-    abi: erc20Abi,
-    data: transferCall.data
-  });
-
-  assert.equal(decoded.functionName, "transfer");
-  assert.deepEqual(decoded.args, [config.escrowAddress, 123_456n]);
+  try {
+    const runway = await provider.readRunwayBalanceUsdc({ escrowUsdc: 0n });
+    assert.equal(runway.creditBalanceUsdc, 12_340_000n);
+    assert.equal(runway.fundingSource, "alchemy-credits");
+    assert.deepEqual(provider.transferSpec("routine"), {
+      decision: "pay-escrow",
+      recipientLabel: "Alchemy payer wallet"
+    });
+    assert.deepEqual(provider.transferSpec("harvest"), {
+      decision: "fund-escrow",
+      recipientLabel: "Alchemy payer wallet"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

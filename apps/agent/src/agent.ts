@@ -348,7 +348,7 @@ function planPayEscrowAction(
   };
 }
 
-function planConwayTopupAction(config: Config, amountUsdc: bigint, reason: string): PlannedAction {
+function planConwayTopupAction(config: Config, amountUsdc: bigint, reason: string, providerLabel: string): PlannedAction {
   if (amountUsdc <= 0n) {
     return {
       decision: "none",
@@ -357,7 +357,7 @@ function planConwayTopupAction(config: Config, amountUsdc: bigint, reason: strin
       escrowPaymentUsdc: 0n,
       topupAmountUsdc: 0n,
       topupReason: reason,
-      summary: `${reason}: no Conway credit topup required`
+      summary: `${reason}: no ${providerLabel} credit topup required`
     };
   }
 
@@ -368,7 +368,7 @@ function planConwayTopupAction(config: Config, amountUsdc: bigint, reason: strin
     escrowPaymentUsdc: 0n,
     topupAmountUsdc: amountUsdc,
     topupReason: reason,
-    summary: `${reason}: top up Conway credits by ${formatToken(amountUsdc, config.expectedDecimals.usdc)} USDC`
+    summary: `${reason}: top up ${providerLabel} credits by ${formatToken(amountUsdc, config.expectedDecimals.usdc)} USDC`
   };
 }
 
@@ -827,9 +827,12 @@ async function main(): Promise<void> {
   if (circlePaymaster.enabled) {
     console.log(`[startup] circlePaymaster=${circlePaymaster.paymasterAddress} (gas paid in USDC)`);
   }
-  if (billingProvider.mode === "conway") {
+  const hasCreditBilling = billingProvider.mode !== "escrow";
+  const creditProviderLabel = billingProvider.mode === "alchemy" ? "Alchemy" : "Conway";
+
+  if (hasCreditBilling) {
     console.log(
-      `[startup] conwayPayer=${config.conwayPayerAddress ?? "unconfigured"} creditsFloor=${formatToken(config.conwayCreditsMinBalanceUsdc, config.expectedDecimals.usdc)} payerFloor=${formatToken(config.conwayPayerMinBalanceUsdc, config.expectedDecimals.usdc)}`
+      `[startup] ${creditProviderLabel.toLowerCase()}Payer=${config.conwayPayerAddress ?? "unconfigured"} creditsFloor=${formatToken(config.conwayCreditsMinBalanceUsdc, config.expectedDecimals.usdc)} payerFloor=${formatToken(config.conwayPayerMinBalanceUsdc, config.expectedDecimals.usdc)}`
     );
   }
 
@@ -871,8 +874,7 @@ async function main(): Promise<void> {
       const initialRunwayStatus = await billingProvider.readRunwayBalanceUsdc(initialSnapshot);
       const initialRunway = buildRunway(config, initialRunwayStatus.creditBalanceUsdc, perTickCostUsdc);
       nextIntervalMultiplier = adaptiveIntervalMultiplier(initialRunway.urgency);
-      const conwayMode = billingProvider.mode === "conway";
-      const initialPayerBalanceUsdc = conwayMode
+      const initialPayerBalanceUsdc = hasCreditBilling
         ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
         : null;
 
@@ -894,23 +896,23 @@ async function main(): Promise<void> {
       const loopCap = effectiveMaxLoops(config.maxLoops, initialRunway.urgency);
       const nowMs = parseTimestampMs(runTimestamp) ?? Date.now();
       const payerFundingWindowStartMs = nowMs - 24 * 60 * 60 * 1000;
-      const payerFundingUsedLast24hUsdc = conwayMode
+      const payerFundingUsedLast24hUsdc = hasCreditBilling
         ? sumHistoricalPayerFundingUsdc(runs, payerFundingWindowStartMs, nowMs)
         : 0n;
-      const payerFundingRemainingDailyUsdc = conwayMode
+      const payerFundingRemainingDailyUsdc = hasCreditBilling
         ? safeSub(config.conwayPayerFundMaxUsdcPerDay, payerFundingUsedLast24hUsdc)
         : 0n;
-      const payerFundingCooldownActive = conwayMode
+      const payerFundingCooldownActive = hasCreditBilling
         ? cooldownActive(nowMs, findLastSuccessfulPayerFundingMs(runs), config.conwayPayerFundCooldownSeconds)
         : false;
-      const creditTopupCooldownActive = conwayMode
+      const creditTopupCooldownActive = hasCreditBilling
         ? cooldownActive(nowMs, findLastSuccessfulTopupMs(runs), config.conwayCreditsTopupCooldownSeconds)
         : false;
 
       const hfBelowTarget = initialSnapshot.position.healthFactor < config.hfTargetWad;
       const deficitToNominalUsdc = escrowDeficitUsdc(initialRunway, config.runwayNominalDays);
       const deficitToElevatedUsdc = escrowDeficitUsdc(initialRunway, config.runwayElevatedDays);
-      const creditsTargetDeficitUsdc = conwayMode
+      const creditsTargetDeficitUsdc = hasCreditBilling
         ? safeSub(config.conwayCreditsTargetBalanceUsdc, initialRunwayStatus.creditBalanceUsdc)
         : 0n;
 
@@ -934,7 +936,7 @@ async function main(): Promise<void> {
 
       if (hfBelowTarget) {
         planned = await planDeleverAction(config, initialSnapshot, smartAccount.address);
-      } else if (conwayMode) {
+      } else if (hasCreditBilling) {
         const payerBalanceUsdc = initialPayerBalanceUsdc ?? 0n;
         const payerLowFloor = payerBalanceUsdc < config.conwayPayerMinBalanceUsdc;
         const payerBelowTarget = payerBalanceUsdc < config.conwayPayerTargetBalanceUsdc;
@@ -998,7 +1000,7 @@ async function main(): Promise<void> {
           ) {
             planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
               targetUsdc: payerFundingTargetUsdc,
-              reason: "Fund Conway payer runway",
+              reason: `Fund ${creditProviderLabel} payer runway`,
               capByEquityBps: initialRunway.urgency !== "nominal",
               harvestMaxSafe: initialRunway.urgency === "dead"
             });
@@ -1008,7 +1010,7 @@ async function main(): Promise<void> {
               billingProvider,
               initialSnapshot,
               payerFundingTargetUsdc,
-              "Fund Conway payer runway"
+              `Fund ${creditProviderLabel} payer runway`
             );
           }
         } else if (
@@ -1018,21 +1020,26 @@ async function main(): Promise<void> {
           if (creditTopupCooldownActive) {
             planned = {
               ...planned,
-              summary: "Conway credits below target runway, but topup cooldown is active"
+              summary: `${creditProviderLabel} credits below target runway, but topup cooldown is active`
             };
           } else if (cappedCreditsTopupUsdc > 0n) {
-            planned = planConwayTopupAction(config, cappedCreditsTopupUsdc, "Top up Conway credits runway");
+            planned = planConwayTopupAction(
+              config,
+              cappedCreditsTopupUsdc,
+              `Top up ${creditProviderLabel} credits runway`,
+              creditProviderLabel
+            );
           } else if (!payerFundingCooldownActive && payerBelowTarget && payerFundingTargetUsdc > 0n) {
             planned = await planFundEscrowAction(config, billingProvider, initialSnapshot, smartAccount.address, {
               targetUsdc: payerFundingTargetUsdc,
-              reason: "Prepare Conway payer wallet for credit topups",
+              reason: `Prepare ${creditProviderLabel} payer wallet for credit topups`,
               capByEquityBps: initialRunway.urgency !== "nominal",
               harvestMaxSafe: initialRunway.urgency === "dead"
             });
           } else {
             planned = {
               ...planned,
-              summary: "Conway credits below target runway, but payer wallet does not have topup budget above floor"
+              summary: `${creditProviderLabel} credits below target runway, but payer wallet does not have topup budget above floor`
             };
           }
         } else if (initialRunway.urgency === "nominal" && profitable && consecutiveLoops < loopCap && canRiskGate) {
@@ -1051,7 +1058,7 @@ async function main(): Promise<void> {
             billingProvider,
             initialSnapshot,
             payerFundingTargetUsdc,
-            "Routine Conway payer refill from idle USDC"
+            `Routine ${creditProviderLabel} payer refill from idle USDC`
           );
         }
       } else if (initialRunway.urgency === "critical" || initialRunway.urgency === "dead") {
@@ -1130,7 +1137,7 @@ async function main(): Promise<void> {
       if (planned.decision === "none") {
         runRecord.status = "skipped";
         runRecord.reason = planned.summary;
-        if (conwayMode && initialPayerBalanceUsdc !== null) {
+        if (hasCreditBilling && initialPayerBalanceUsdc !== null) {
           runRecord.reconciliation = buildConwayReconciliationSnapshot({
             runs,
             windowHours: config.conwayReconciliationWindowHours,
@@ -1166,7 +1173,7 @@ async function main(): Promise<void> {
         } else if (!billingProvider.topUpCredits) {
           topupStatus = "error";
           runStatus = "error";
-          runReason = "Billing provider does not support Conway credit topups";
+          runReason = "Billing provider does not support credit topups";
         } else {
           const topupResult = await billingProvider.topUpCredits(planned.topupAmountUsdc, planned.topupReason);
           topupStatus = topupResult.status;
@@ -1190,7 +1197,7 @@ async function main(): Promise<void> {
           swapCostUsd: 0n,
           computeCostUsd: perTickCostUsd
         });
-        const finalPayerBalanceUsdc = conwayMode
+        const finalPayerBalanceUsdc = hasCreditBilling
           ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
           : null;
         const currentTopupUsdc = topupStatus === "ok" ? topupAmountUsdc : 0n;
@@ -1210,7 +1217,7 @@ async function main(): Promise<void> {
           fundingSource: finalRunwayStatus.fundingSource,
           fallbackWarning: finalRunwayStatus.fallbackWarning
         };
-        if (conwayMode && finalPayerBalanceUsdc !== null) {
+        if (hasCreditBilling && finalPayerBalanceUsdc !== null) {
           runRecord.reconciliation = buildConwayReconciliationSnapshot({
             runs,
             windowHours: config.conwayReconciliationWindowHours,
@@ -1237,7 +1244,7 @@ async function main(): Promise<void> {
       if (planned.calls.length === 0) {
         runRecord.status = "skipped";
         runRecord.reason = planned.summary;
-        if (conwayMode && initialPayerBalanceUsdc !== null) {
+        if (hasCreditBilling && initialPayerBalanceUsdc !== null) {
           runRecord.reconciliation = buildConwayReconciliationSnapshot({
             runs,
             windowHours: config.conwayReconciliationWindowHours,
@@ -1317,10 +1324,11 @@ async function main(): Promise<void> {
       const finalRunwayStatus = await billingProvider.readRunwayBalanceUsdc(liveSnapshot);
       const finalRunway = buildRunway(config, finalRunwayStatus.creditBalanceUsdc, perTickCostUsdc);
       nextIntervalMultiplier = adaptiveIntervalMultiplier(finalRunway.urgency);
-      const finalPayerBalanceUsdc = conwayMode
+      const finalPayerBalanceUsdc = hasCreditBilling
         ? await readUsdcBalanceForAddress(chain.publicClient, config.usdcAddress, config.conwayPayerAddress)
         : null;
-      const settledPayerFundingUsdc = conwayMode && !config.dryRun && result.success ? planned.escrowPaymentUsdc : 0n;
+      const settledPayerFundingUsdc =
+        hasCreditBilling && !config.dryRun && result.success ? planned.escrowPaymentUsdc : 0n;
 
       const finalEconomics = computeEconomics({
         timestamp: runTimestamp,
@@ -1359,7 +1367,7 @@ async function main(): Promise<void> {
         computeBurnUsdc: perTickCostUsdc,
         fallbackWarning: finalRunwayStatus.fallbackWarning
       };
-      if (conwayMode && finalPayerBalanceUsdc !== null) {
+      if (hasCreditBilling && finalPayerBalanceUsdc !== null) {
         runRecord.reconciliation = buildConwayReconciliationSnapshot({
           runs,
           windowHours: config.conwayReconciliationWindowHours,

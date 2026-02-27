@@ -33,7 +33,17 @@ const BASE_ENV: Record<string, string> = {
   CONWAY_PAYER_MAX_FUND_USDC_PER_DAY: "100",
   CONWAY_PAYER_FUND_COOLDOWN_SECONDS: "900",
   CONWAY_RECONCILIATION_BOOTSTRAP_USDC: "0",
-  CONWAY_RECONCILIATION_WINDOW_HOURS: "24"
+  CONWAY_RECONCILIATION_WINDOW_HOURS: "24",
+  ALCHEMY_API_BASE_URL: "",
+  ALCHEMY_API_KEY: "",
+  ALCHEMY_CREDITS_BALANCE_PATH: "",
+  ALCHEMY_CREDITS_TOPUP_PATH: "",
+  ALCHEMY_PAYMENT_RECIPIENT_ADDRESS: "",
+  ALCHEMY_PAYER_ADDRESS: "",
+  ALCHEMY_PAYER_PRIVATE_KEY: "",
+  ALCHEMY_X402_ENABLED: "",
+  ALCHEMY_X402_HEADER_NAME: "",
+  ALCHEMY_FALLBACK_TO_ESCROW_ON_ERROR: ""
 };
 
 function withEnv(overrides: Record<string, string>, run: () => void): void {
@@ -78,7 +88,7 @@ test("loadConfig rejects unknown compute billing mode", () => {
       COMPUTE_BILLING_MODE: "unknown"
     },
     () => {
-      assert.throws(() => loadConfig(), /COMPUTE_BILLING_MODE must be escrow\|conway/);
+      assert.throws(() => loadConfig(), /COMPUTE_BILLING_MODE must be escrow\|conway\|alchemy/);
     }
   );
 });
@@ -103,6 +113,18 @@ test("loadConfig requires CONWAY_API_BASE_URL in conway mode", () => {
     },
     () => {
       assert.throws(() => loadConfig(), /CONWAY_API_BASE_URL is required/);
+    }
+  );
+});
+
+test("loadConfig requires ALCHEMY_API_BASE_URL in alchemy mode", () => {
+  withEnv(
+    {
+      COMPUTE_BILLING_MODE: "alchemy",
+      ALCHEMY_API_BASE_URL: ""
+    },
+    () => {
+      assert.throws(() => loadConfig(), /ALCHEMY_API_BASE_URL is required/);
     }
   );
 });
@@ -140,6 +162,31 @@ test("loadConfig accepts conway billing settings", () => {
       assert.equal(config.conwayX402Enabled, true);
       assert.equal(config.conwayPayerFundMaxUsdcPerDay, 100_000_000n);
       assert.equal(config.conwayCreditsTargetBalanceUsdc, 50_000_000n);
+    }
+  );
+});
+
+test("loadConfig accepts alchemy billing settings", () => {
+  const payerKey = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+  withEnv(
+    {
+      COMPUTE_BILLING_MODE: "alchemy",
+      ALCHEMY_API_BASE_URL: "https://api.g.alchemy.com",
+      ALCHEMY_API_KEY: "alchemy-token",
+      ALCHEMY_CREDITS_BALANCE_PATH: "/v1/credits/balance",
+      ALCHEMY_CREDITS_TOPUP_PATH: "/pay",
+      ALCHEMY_PAYER_PRIVATE_KEY: payerKey
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.computeBillingMode, "alchemy");
+      assert.equal(config.conwayApiBaseUrl, "https://api.g.alchemy.com");
+      assert.equal(config.conwayApiKey, "alchemy-token");
+      assert.equal(config.conwayCreditsBalancePath, "/v1/credits/balance");
+      assert.equal(config.conwayCreditsTopupPath, "/pay");
+      assert.equal(config.conwayPayerPrivateKey, payerKey);
+      assert.equal(config.conwayPayerAddress, privateKeyToAccount(payerKey as `0x${string}`).address);
+      assert.equal(config.conwayX402HeaderName, "payment-signature");
     }
   );
 });

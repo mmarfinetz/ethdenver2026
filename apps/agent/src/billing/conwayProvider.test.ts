@@ -307,6 +307,91 @@ test("ConwayBillingProvider retries /pay topup for x402 v2 accepts challenge", a
   }
 });
 
+test("ConwayBillingProvider uses payment-signature header when PAYMENT-REQUIRED challenge is returned", async () => {
+  const config = makeConfig({ conwayCreditsTopupPath: "/pay", conwayX402HeaderName: "x-payment" });
+  const provider = new ConwayBillingProvider(config);
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers; method: string | undefined }> = [];
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input, init] = args;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const headers = new Headers(init?.headers);
+    requests.push({ url, headers, method: init?.method });
+
+    if (url.endsWith("/v1/credits/pricing")) {
+      return new Response(
+        JSON.stringify({
+          tiers: [{ amount: 5 }, { amount: 25 }]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
+    const expectedTopupUrl = `https://api.conway.test/pay/25/${config.conwayPayerAddress}`;
+    if (url === expectedTopupUrl && requests.filter((request) => request.url === expectedTopupUrl).length === 1) {
+      return new Response(
+        JSON.stringify({
+          x402Version: 2,
+          accepts: [
+            {
+              scheme: "exact",
+              network: "eip155:8453",
+              maxAmountRequired: "25000000",
+              payTo: config.conwayPaymentRecipientAddress,
+              asset: config.usdcAddress,
+              maxTimeoutSeconds: 30
+            }
+          ]
+        }),
+        {
+          status: 402,
+          headers: {
+            "content-type": "application/json",
+            "payment-required": "true"
+          }
+        }
+      );
+    }
+
+    assert.equal(url, expectedTopupUrl);
+    assert.equal(init?.method, "GET");
+    const paymentHeader = headers.get("payment-signature");
+    assert.equal(typeof paymentHeader, "string");
+    assert.equal((paymentHeader ?? "").length > 0, true);
+
+    return new Response(
+      JSON.stringify({
+        topup: {
+          creditedUsdc: "25000000"
+        }
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      }
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await provider.topUpCredits(25_000_000n, "x402 standard header");
+    assert.equal(result.status, "ok");
+    assert.equal(result.amountUsdc, 25_000_000n);
+    assert.equal(requests.length, 3);
+    assert.equal((requests[2]?.headers.get("payment-signature") ?? "").length > 0, true);
+    assert.equal(requests[2]?.headers.get("x-payment"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("ConwayBillingProvider resolves credits recipient from /v1/auth/me when API key is configured", async () => {
   const discoveredRecipient = "0x0000000000000000000000000000000000000009";
   const config = makeConfig({

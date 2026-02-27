@@ -541,7 +541,7 @@ function decisionMessage(decision: string): string {
   if (decision === "delever") return "Delevering position.";
   if (decision === "fund-escrow") return "Funding escrow.";
   if (decision === "pay-escrow") return "Paying escrow.";
-  if (decision === "topup-credits") return "Topping up Conway credits.";
+  if (decision === "topup-credits") return "Topping up API credits.";
   return "Systems nominal.";
 }
 

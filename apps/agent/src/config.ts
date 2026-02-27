@@ -22,7 +22,7 @@ import type { Address, Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { CIRCLE_PAYMASTER_ADDRESS } from "./aa/paymaster";
 
-export type ComputeBillingMode = "escrow" | "conway";
+export type ComputeBillingMode = "escrow" | "conway" | "alchemy";
 
 export type AgentConfig = {
   chainId: number;
@@ -113,6 +113,14 @@ function optionalPrivateKey(raw: string | undefined, label: string): Hex | undef
   return value as Hex;
 }
 
+function firstSetOptionalEnv(keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = optionalEnv(key);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function isZeroAddress(value: Address): boolean {
@@ -123,8 +131,8 @@ export function loadConfig(): AgentConfig {
   const chainId = parseInteger(process.env.CHAIN_ID ?? String(BASE_MAINNET_CHAIN_ID), "CHAIN_ID");
   const defaults = CHAIN_DEFAULTS[chainId] ?? CHAIN_DEFAULTS[BASE_MAINNET_CHAIN_ID];
   const computeBillingModeRaw = (process.env.COMPUTE_BILLING_MODE ?? "escrow").trim().toLowerCase();
-  if (computeBillingModeRaw !== "escrow" && computeBillingModeRaw !== "conway") {
-    throw new Error(`COMPUTE_BILLING_MODE must be escrow|conway, got ${computeBillingModeRaw}`);
+  if (computeBillingModeRaw !== "escrow" && computeBillingModeRaw !== "conway" && computeBillingModeRaw !== "alchemy") {
+    throw new Error(`COMPUTE_BILLING_MODE must be escrow|conway|alchemy, got ${computeBillingModeRaw}`);
   }
   const computeBillingMode = computeBillingModeRaw as ComputeBillingMode;
 
@@ -180,13 +188,55 @@ export function loadConfig(): AgentConfig {
   const circlePaymasterAddress =
     optionalAddress(process.env.CIRCLE_PAYMASTER_ADDRESS, "CIRCLE_PAYMASTER_ADDRESS") ?? CIRCLE_PAYMASTER_ADDRESS;
 
-  const conwayApiBaseUrl = optionalEnv("CONWAY_API_BASE_URL");
-  if (computeBillingMode === "conway" && !conwayApiBaseUrl) {
-    throw new Error("CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway");
+  const providerModeLabel = computeBillingMode === "alchemy" ? "Alchemy" : "Conway";
+  const providerApiBaseUrlEnvLabel = computeBillingMode === "alchemy" ? "ALCHEMY_API_BASE_URL" : "CONWAY_API_BASE_URL";
+  const providerPayerAddressEnvLabel = computeBillingMode === "alchemy" ? "ALCHEMY_PAYER_ADDRESS" : "CONWAY_PAYER_ADDRESS";
+  const providerPayerPrivateKeyEnvLabel =
+    computeBillingMode === "alchemy" ? "ALCHEMY_PAYER_PRIVATE_KEY" : "CONWAY_PAYER_PRIVATE_KEY";
+
+  const providerApiBaseUrlKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_API_BASE_URL", "CONWAY_API_BASE_URL"] : ["CONWAY_API_BASE_URL"];
+  const providerApiKeyKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_API_KEY", "CONWAY_API_KEY"] : ["CONWAY_API_KEY"];
+  const providerCreditsBalancePathKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_CREDITS_BALANCE_PATH", "CONWAY_CREDITS_BALANCE_PATH"]
+      : ["CONWAY_CREDITS_BALANCE_PATH"];
+  const providerCreditsTopupPathKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_CREDITS_TOPUP_PATH", "CONWAY_CREDITS_TOPUP_PATH"]
+      : ["CONWAY_CREDITS_TOPUP_PATH"];
+  const providerPaymentRecipientAddressKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_PAYMENT_RECIPIENT_ADDRESS", "CONWAY_PAYMENT_RECIPIENT_ADDRESS"]
+      : ["CONWAY_PAYMENT_RECIPIENT_ADDRESS"];
+  const providerPayerAddressKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_PAYER_ADDRESS", "CONWAY_PAYER_ADDRESS"] : ["CONWAY_PAYER_ADDRESS"];
+  const providerPayerPrivateKeyKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_PAYER_PRIVATE_KEY", "CONWAY_PAYER_PRIVATE_KEY"]
+      : ["CONWAY_PAYER_PRIVATE_KEY"];
+  const providerX402EnabledKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_X402_ENABLED", "CONWAY_X402_ENABLED"] : ["CONWAY_X402_ENABLED"];
+  const providerX402HeaderNameKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_X402_HEADER_NAME"]
+      : ["CONWAY_X402_HEADER_NAME"];
+  const providerFallbackToEscrowOnErrorKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_FALLBACK_TO_ESCROW_ON_ERROR", "CONWAY_FALLBACK_TO_ESCROW_ON_ERROR"]
+      : ["CONWAY_FALLBACK_TO_ESCROW_ON_ERROR"];
+
+  const conwayApiBaseUrl = firstSetOptionalEnv(providerApiBaseUrlKeys);
+  if ((computeBillingMode === "conway" || computeBillingMode === "alchemy") && !conwayApiBaseUrl) {
+    throw new Error(`${providerApiBaseUrlEnvLabel} is required when COMPUTE_BILLING_MODE=${computeBillingMode}`);
   }
-  const conwayPayerPrivateKey = optionalPrivateKey(process.env.CONWAY_PAYER_PRIVATE_KEY, "CONWAY_PAYER_PRIVATE_KEY");
+  const conwayPayerPrivateKey = optionalPrivateKey(
+    firstSetOptionalEnv(providerPayerPrivateKeyKeys),
+    providerPayerPrivateKeyEnvLabel
+  );
   const conwayPayerAddress =
-    optionalAddress(process.env.CONWAY_PAYER_ADDRESS, "CONWAY_PAYER_ADDRESS") ??
+    optionalAddress(firstSetOptionalEnv(providerPayerAddressKeys), providerPayerAddressEnvLabel) ??
     (conwayPayerPrivateKey ? privateKeyToAccount(conwayPayerPrivateKey).address : undefined);
   const conwayCreditsMinBalanceUsdc = parseDecimalToUnits(
     process.env.CONWAY_CREDITS_MIN_BALANCE_USDC ?? "10",
@@ -256,11 +306,11 @@ export function loadConfig(): AgentConfig {
     throw new Error("CONWAY_RECONCILIATION_WINDOW_HOURS must be > 0");
   }
   if (
-    computeBillingMode === "conway" &&
+    (computeBillingMode === "conway" || computeBillingMode === "alchemy") &&
     (conwayPayerMinBalanceUsdc > 0n || conwayPayerTargetBalanceUsdc > 0n) &&
     !conwayPayerAddress
   ) {
-    throw new Error("CONWAY_PAYER_ADDRESS or CONWAY_PAYER_PRIVATE_KEY is required in Conway billing mode");
+    throw new Error(`${providerPayerAddressEnvLabel} or ${providerPayerPrivateKeyEnvLabel} is required in ${providerModeLabel} billing mode`);
   }
 
   const entryPointAddress = optionalAddress(process.env.ENTRYPOINT_ADDRESS, "ENTRYPOINT_ADDRESS") ?? defaults.entryPoint07;
@@ -319,18 +369,19 @@ export function loadConfig(): AgentConfig {
     zrxApiUrl: process.env.ZEROX_API_URL?.trim() || "https://base.api.0x.org/swap/allowance-holder/quote",
     zrxApiKey: optionalEnv("ZEROX_API_KEY"),
     conwayApiBaseUrl,
-    conwayApiKey: optionalEnv("CONWAY_API_KEY"),
-    conwayCreditsBalancePath: process.env.CONWAY_CREDITS_BALANCE_PATH?.trim() || "/v1/credits/balance",
-    conwayCreditsTopupPath: process.env.CONWAY_CREDITS_TOPUP_PATH?.trim() || "/pay",
+    conwayApiKey: firstSetOptionalEnv(providerApiKeyKeys),
+    conwayCreditsBalancePath: firstSetOptionalEnv(providerCreditsBalancePathKeys) ?? "/v1/credits/balance",
+    conwayCreditsTopupPath: firstSetOptionalEnv(providerCreditsTopupPathKeys) ?? "/pay",
     conwayPaymentRecipientAddress: optionalAddress(
-      process.env.CONWAY_PAYMENT_RECIPIENT_ADDRESS,
-      "CONWAY_PAYMENT_RECIPIENT_ADDRESS"
+      firstSetOptionalEnv(providerPaymentRecipientAddressKeys),
+      computeBillingMode === "alchemy" ? "ALCHEMY_PAYMENT_RECIPIENT_ADDRESS" : "CONWAY_PAYMENT_RECIPIENT_ADDRESS"
     ),
     conwayPayerAddress,
-    conwayX402Enabled: parseBoolean(process.env.CONWAY_X402_ENABLED, true),
+    conwayX402Enabled: parseBoolean(firstSetOptionalEnv(providerX402EnabledKeys), true),
     conwayPayerPrivateKey,
-    conwayX402HeaderName: process.env.CONWAY_X402_HEADER_NAME?.trim() || "x-payment",
-    conwayFallbackToEscrowOnError: parseBoolean(process.env.CONWAY_FALLBACK_TO_ESCROW_ON_ERROR, true),
+    conwayX402HeaderName:
+      firstSetOptionalEnv(providerX402HeaderNameKeys) ?? (computeBillingMode === "alchemy" ? "payment-signature" : "x-payment"),
+    conwayFallbackToEscrowOnError: parseBoolean(firstSetOptionalEnv(providerFallbackToEscrowOnErrorKeys), true),
     conwayCreditsMinBalanceUsdc,
     conwayCreditsTargetBalanceUsdc,
     conwayCreditsTopupMaxUsdcPerTick,

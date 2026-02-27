@@ -20,7 +20,7 @@ import { base, baseSepolia } from "viem/chains";
 
 const exec = promisify(execWithCallback);
 
-export type ComputeBillingMode = "escrow" | "conway";
+export type ComputeBillingMode = "escrow" | "conway" | "alchemy";
 
 export type WatcherConfig = {
   chainId: number;
@@ -54,6 +54,14 @@ function parseBoolean(raw: string | undefined, defaultValue: boolean): boolean {
   if (["1", "true", "yes", "y"].includes(normalized)) return true;
   if (["0", "false", "no", "n"].includes(normalized)) return false;
   throw new Error(`Invalid boolean value: ${raw}`);
+}
+
+function firstSetOptionalEnv(keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = optionalEnv(key);
+    if (value) return value;
+  }
+  return undefined;
 }
 
 function resolveChain(chainId: number): Chain {
@@ -157,10 +165,26 @@ export function loadWatcherConfig(): WatcherConfig {
   const chainId = parseInteger(process.env.CHAIN_ID ?? String(BASE_MAINNET_CHAIN_ID), "CHAIN_ID");
   const defaults = CHAIN_DEFAULTS[chainId] ?? CHAIN_DEFAULTS[BASE_MAINNET_CHAIN_ID];
   const computeBillingModeRaw = (process.env.COMPUTE_BILLING_MODE ?? "escrow").trim().toLowerCase();
-  if (computeBillingModeRaw !== "escrow" && computeBillingModeRaw !== "conway") {
-    throw new Error(`COMPUTE_BILLING_MODE must be escrow|conway, got ${computeBillingModeRaw}`);
+  if (computeBillingModeRaw !== "escrow" && computeBillingModeRaw !== "conway" && computeBillingModeRaw !== "alchemy") {
+    throw new Error(`COMPUTE_BILLING_MODE must be escrow|conway|alchemy, got ${computeBillingModeRaw}`);
   }
   const computeBillingMode = computeBillingModeRaw as ComputeBillingMode;
+  const providerApiBaseUrlEnvLabel = computeBillingMode === "alchemy" ? "ALCHEMY_API_BASE_URL" : "CONWAY_API_BASE_URL";
+  const providerPayerAddressEnvLabel = computeBillingMode === "alchemy" ? "ALCHEMY_PAYER_ADDRESS" : "CONWAY_PAYER_ADDRESS";
+  const providerApiBaseUrlKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_API_BASE_URL", "CONWAY_API_BASE_URL"] : ["CONWAY_API_BASE_URL"];
+  const providerApiKeyKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_API_KEY", "CONWAY_API_KEY"] : ["CONWAY_API_KEY"];
+  const providerCreditsBalancePathKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_CREDITS_BALANCE_PATH", "CONWAY_CREDITS_BALANCE_PATH"]
+      : ["CONWAY_CREDITS_BALANCE_PATH"];
+  const providerPayerAddressKeys =
+    computeBillingMode === "alchemy" ? ["ALCHEMY_PAYER_ADDRESS", "CONWAY_PAYER_ADDRESS"] : ["CONWAY_PAYER_ADDRESS"];
+  const providerFallbackToEscrowOnErrorKeys =
+    computeBillingMode === "alchemy"
+      ? ["ALCHEMY_FALLBACK_TO_ESCROW_ON_ERROR", "CONWAY_FALLBACK_TO_ESCROW_ON_ERROR"]
+      : ["CONWAY_FALLBACK_TO_ESCROW_ON_ERROR"];
 
   const watchIntervalSeconds = parseInteger(process.env.WATCH_INTERVAL_SECONDS ?? "300", "WATCH_INTERVAL_SECONDS");
   const failureThreshold = parseInteger(process.env.WATCH_FAILURE_THRESHOLD ?? "3", "WATCH_FAILURE_THRESHOLD");
@@ -177,11 +201,11 @@ export function loadWatcherConfig(): WatcherConfig {
     "WATCH_LOW_PAYER_GRACE_CHECKS"
   );
   const usdcDecimals = parseInteger(process.env.USDC_DECIMALS ?? String(USDC_DECIMALS), "USDC_DECIMALS");
-  const conwayApiBaseUrl = optionalEnv("CONWAY_API_BASE_URL");
-  if (computeBillingMode === "conway" && !conwayApiBaseUrl) {
-    throw new Error("CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway");
+  const conwayApiBaseUrl = firstSetOptionalEnv(providerApiBaseUrlKeys);
+  if ((computeBillingMode === "conway" || computeBillingMode === "alchemy") && !conwayApiBaseUrl) {
+    throw new Error(`${providerApiBaseUrlEnvLabel} is required when COMPUTE_BILLING_MODE=${computeBillingMode}`);
   }
-  const conwayPayerAddress = optionalAddress(process.env.CONWAY_PAYER_ADDRESS, "CONWAY_PAYER_ADDRESS");
+  const conwayPayerAddress = optionalAddress(firstSetOptionalEnv(providerPayerAddressKeys), providerPayerAddressEnvLabel);
 
   if (watchIntervalSeconds <= 0) {
     throw new Error(`WATCH_INTERVAL_SECONDS must be > 0, got ${watchIntervalSeconds}`);
@@ -216,8 +240,8 @@ export function loadWatcherConfig(): WatcherConfig {
     usdcDecimals,
     "CONWAY_MIN_PAYER_BALANCE_USDC"
   );
-  if (computeBillingMode === "conway" && minConwayPayerBalanceUsdc > 0n && !conwayPayerAddress) {
-    throw new Error("CONWAY_PAYER_ADDRESS is required when CONWAY_MIN_PAYER_BALANCE_USDC > 0");
+  if ((computeBillingMode === "conway" || computeBillingMode === "alchemy") && minConwayPayerBalanceUsdc > 0n && !conwayPayerAddress) {
+    throw new Error(`${providerPayerAddressEnvLabel} is required when CONWAY_MIN_PAYER_BALANCE_USDC > 0`);
   }
 
   return {
@@ -237,10 +261,10 @@ export function loadWatcherConfig(): WatcherConfig {
     minConwayCreditsBalanceUsdc,
     minConwayPayerBalanceUsdc,
     conwayApiBaseUrl,
-    conwayApiKey: optionalEnv("CONWAY_API_KEY"),
-    conwayCreditsBalancePath: process.env.CONWAY_CREDITS_BALANCE_PATH?.trim() || "/v1/credits/balance",
+    conwayApiKey: firstSetOptionalEnv(providerApiKeyKeys),
+    conwayCreditsBalancePath: firstSetOptionalEnv(providerCreditsBalancePathKeys) || "/v1/credits/balance",
     conwayPayerAddress,
-    conwayFallbackToEscrowOnError: parseBoolean(process.env.CONWAY_FALLBACK_TO_ESCROW_ON_ERROR, true),
+    conwayFallbackToEscrowOnError: parseBoolean(firstSetOptionalEnv(providerFallbackToEscrowOnErrorKeys), true),
     shutdownCommand: process.env.SHUTDOWN_COMMAND?.trim() || "systemctl stop ssa-agent"
   };
 }
@@ -255,8 +279,10 @@ async function readEscrowBalanceUsdc(client: PublicClient, config: WatcherConfig
 }
 
 async function readConwayBalanceUsdc(config: WatcherConfig): Promise<bigint> {
+  const providerLabel = config.computeBillingMode === "alchemy" ? "Alchemy" : "Conway";
+  const providerEnvLabel = config.computeBillingMode === "alchemy" ? "ALCHEMY_API_BASE_URL" : "CONWAY_API_BASE_URL";
   if (!config.conwayApiBaseUrl) {
-    throw new Error("CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway");
+    throw new Error(`${providerEnvLabel} is required when COMPUTE_BILLING_MODE=${config.computeBillingMode}`);
   }
 
   const balanceUrl = new URL(config.conwayCreditsBalancePath, config.conwayApiBaseUrl).toString();
@@ -266,20 +292,20 @@ async function readConwayBalanceUsdc(config: WatcherConfig): Promise<bigint> {
   });
   if (!response.ok) {
     const body = await readText(response);
-    throw new Error(`Conway balance API error ${response.status}: ${body.slice(0, 200)}`);
+    throw new Error(`${providerLabel} balance API error ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const payload = await readJson(response);
   const balanceUsdc = extractConwayBalanceUsdc(payload);
   if (balanceUsdc === null) {
-    throw new Error("Conway balance payload missing recognized balance field");
+    throw new Error(`${providerLabel} balance payload missing recognized balance field`);
   }
   return balanceUsdc;
 }
 
 export type FundingBalanceResult = {
   creditsBalanceUsdc: bigint;
-  creditsSource: "escrow" | "conway";
+  creditsSource: "escrow" | "conway" | "alchemy";
   payerBalanceUsdc: bigint | null;
   fallbackToEscrow: boolean;
 };
@@ -304,13 +330,15 @@ export async function readFundingBalanceUsdc(
 
   try {
     const creditsBalanceUsdc = await readConwayBalanceUsdc(config);
-    return { creditsBalanceUsdc, creditsSource: "conway", payerBalanceUsdc, fallbackToEscrow: false };
+    const creditsSource = config.computeBillingMode === "alchemy" ? "alchemy" : "conway";
+    return { creditsBalanceUsdc, creditsSource, payerBalanceUsdc, fallbackToEscrow: false };
   } catch (error) {
     if (!config.conwayFallbackToEscrowOnError) {
       throw error;
     }
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[watcher] Conway balance unavailable (${message}); falling back to escrow balance`);
+    const providerLabel = config.computeBillingMode === "alchemy" ? "Alchemy" : "Conway";
+    console.warn(`[watcher] ${providerLabel} balance unavailable (${message}); falling back to escrow balance`);
     const creditsBalanceUsdc = await readEscrowBalanceUsdc(client, config);
     return { creditsBalanceUsdc, creditsSource: "escrow", payerBalanceUsdc, fallbackToEscrow: true };
   }
@@ -355,7 +383,7 @@ async function main(): Promise<void> {
     try {
       const fundingBalance = await readFundingBalanceUsdc(client, config);
       const creditsMinUsdc =
-        config.computeBillingMode === "conway" ? config.minConwayCreditsBalanceUsdc : config.minEscrowBalanceUsdc;
+        config.computeBillingMode === "escrow" ? config.minEscrowBalanceUsdc : config.minConwayCreditsBalanceUsdc;
       const creditsBelowThreshold = fundingBalance.creditsBalanceUsdc <= creditsMinUsdc;
 
       if (creditsBelowThreshold) {
@@ -369,7 +397,7 @@ async function main(): Promise<void> {
       }
 
       let payerBelowThreshold = false;
-      if (config.computeBillingMode === "conway" && fundingBalance.payerBalanceUsdc !== null) {
+      if (config.computeBillingMode !== "escrow" && fundingBalance.payerBalanceUsdc !== null) {
         payerBelowThreshold = fundingBalance.payerBalanceUsdc <= config.minConwayPayerBalanceUsdc;
         if (payerBelowThreshold) {
           if (remainingLowPayerGraceChecks > 0) {
@@ -395,7 +423,7 @@ async function main(): Promise<void> {
       }
 
       if (
-        config.computeBillingMode === "conway" &&
+        config.computeBillingMode !== "escrow" &&
         config.minConwayPayerBalanceUsdc > 0n &&
         fundingBalance.payerBalanceUsdc !== null &&
         payerBelowThreshold &&

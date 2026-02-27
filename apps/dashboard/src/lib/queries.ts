@@ -52,7 +52,7 @@ type ParsedRun = Omit<AgentRunRecord, "decision" | "userOp"> & {
 };
 
 const DECISIONS: RunDecision[] = ["none", "loop", "delever", "fund-escrow", "pay-escrow", "topup-credits"];
-const FUNDING_SOURCES: FundingSource[] = ["escrow", "conway-credits", "escrow-fallback"];
+const FUNDING_SOURCES: FundingSource[] = ["escrow", "conway-credits", "alchemy-credits", "escrow-fallback"];
 const TOPUP_STATUSES: TopupStatus[] = ["not-attempted", "ok", "skipped", "error"];
 const URGENCIES: ComputeUrgency[] = ["nominal", "elevated", "critical", "dead"];
 
@@ -532,7 +532,7 @@ function computeLiveRunwayFromLatest(
 
 function resolveRunwayBalanceUsdc(latestRun: ParsedRun | undefined, escrowBalanceUsdc: bigint): bigint {
   if (!latestRun) return escrowBalanceUsdc;
-  if (latestRun.fundingSource === "conway-credits") {
+  if (latestRun.fundingSource === "conway-credits" || latestRun.fundingSource === "alchemy-credits") {
     return latestRun.creditBalanceUsdc;
   }
   return escrowBalanceUsdc;

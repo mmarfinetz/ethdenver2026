@@ -54,7 +54,7 @@ export type ActionDecision =
   | "pay-escrow"
   | "topup-credits";
 
-export type BillingFundingSource = "escrow" | "conway-credits" | "escrow-fallback";
+export type BillingFundingSource = "escrow" | "conway-credits" | "alchemy-credits" | "escrow-fallback";
 
 export type BillingTopupStatus = "not-attempted" | "ok" | "skipped" | "error";
 

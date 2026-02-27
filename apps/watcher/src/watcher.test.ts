@@ -61,6 +61,14 @@ function conwayConfig(overrides: Partial<WatcherConfig> = {}): WatcherConfig {
   };
 }
 
+function alchemyConfig(overrides: Partial<WatcherConfig> = {}): WatcherConfig {
+  return {
+    ...conwayConfig(),
+    computeBillingMode: "alchemy",
+    ...overrides
+  };
+}
+
 test("loadWatcherConfig requires CONWAY_API_BASE_URL when Conway billing mode is enabled", async () => {
   await withEnv(
     {
@@ -73,6 +81,23 @@ test("loadWatcherConfig requires CONWAY_API_BASE_URL when Conway billing mode is
     },
     () => {
       assert.throws(loadWatcherConfig, /CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway/);
+    }
+  );
+});
+
+test("loadWatcherConfig requires ALCHEMY_API_BASE_URL when Alchemy billing mode is enabled", async () => {
+  await withEnv(
+    {
+      CHAIN_ID: "8453",
+      BASE_RPC_URL: "https://rpc.example",
+      ESCROW_ADDRESS: ESCROW_ADDRESS,
+      USDC_ADDRESS: USDC_ADDRESS,
+      COMPUTE_BILLING_MODE: "alchemy",
+      ALCHEMY_API_BASE_URL: undefined,
+      CONWAY_API_BASE_URL: undefined
+    },
+    () => {
+      assert.throws(loadWatcherConfig, /ALCHEMY_API_BASE_URL is required when COMPUTE_BILLING_MODE=alchemy/);
     }
   );
 });
@@ -96,6 +121,37 @@ test("loadWatcherConfig parses Conway env defaults and fallback toggle", async (
       assert.equal(config.computeBillingMode, "conway");
       assert.equal(config.conwayApiBaseUrl, "https://conway.example/api/");
       assert.equal(config.conwayApiKey, "secret-token");
+      assert.equal(config.conwayCreditsBalancePath, "/v1/credits/balance");
+      assert.equal(config.conwayPayerAddress, PAYER_ADDRESS);
+      assert.equal(config.conwayFallbackToEscrowOnError, false);
+    }
+  );
+});
+
+test("loadWatcherConfig parses Alchemy env defaults and fallback toggle", async () => {
+  await withEnv(
+    {
+      CHAIN_ID: "8453",
+      BASE_RPC_URL: "https://rpc.example",
+      ESCROW_ADDRESS: ESCROW_ADDRESS,
+      USDC_ADDRESS: USDC_ADDRESS,
+      COMPUTE_BILLING_MODE: "alchemy",
+      ALCHEMY_API_BASE_URL: " https://alchemy.example/api/ ",
+      ALCHEMY_API_KEY: " alchemy-token ",
+      ALCHEMY_CREDITS_BALANCE_PATH: undefined,
+      ALCHEMY_PAYER_ADDRESS: PAYER_ADDRESS,
+      ALCHEMY_FALLBACK_TO_ESCROW_ON_ERROR: "false",
+      CONWAY_API_BASE_URL: undefined,
+      CONWAY_API_KEY: undefined,
+      CONWAY_CREDITS_BALANCE_PATH: undefined,
+      CONWAY_PAYER_ADDRESS: undefined,
+      CONWAY_FALLBACK_TO_ESCROW_ON_ERROR: undefined
+    },
+    () => {
+      const config = loadWatcherConfig();
+      assert.equal(config.computeBillingMode, "alchemy");
+      assert.equal(config.conwayApiBaseUrl, "https://alchemy.example/api/");
+      assert.equal(config.conwayApiKey, "alchemy-token");
       assert.equal(config.conwayCreditsBalancePath, "/v1/credits/balance");
       assert.equal(config.conwayPayerAddress, PAYER_ADDRESS);
       assert.equal(config.conwayFallbackToEscrowOnError, false);
@@ -144,6 +200,37 @@ test("readFundingBalanceUsdc uses Conway balance when available", async () => {
     const result = await readFundingBalanceUsdc(client, conwayConfig());
     assert.equal(result.creditsBalanceUsdc, 123_450_000n);
     assert.equal(result.creditsSource, "conway");
+    assert.equal(result.payerBalanceUsdc, 7_654_321n);
+    assert.equal(result.fallbackToEscrow, false);
+    assert.deepEqual(readArgs, [PAYER_ADDRESS]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("readFundingBalanceUsdc uses Alchemy balance when available", async () => {
+  const readArgs: Address[] = [];
+  const client = {
+    readContract: async (input: { args?: Address[] }) => {
+      const address = input.args?.[0];
+      if (!address) throw new Error("missing balanceOf args");
+      readArgs.push(address);
+      if (address === PAYER_ADDRESS) return 7_654_321n;
+      throw new Error("escrow read should not be used when Alchemy succeeds");
+    }
+  } as unknown as PublicClient;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ credits_cents: "12345" }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+
+  try {
+    const result = await readFundingBalanceUsdc(client, alchemyConfig());
+    assert.equal(result.creditsBalanceUsdc, 123_450_000n);
+    assert.equal(result.creditsSource, "alchemy");
     assert.equal(result.payerBalanceUsdc, 7_654_321n);
     assert.equal(result.fallbackToEscrow, false);
     assert.deepEqual(readArgs, [PAYER_ADDRESS]);

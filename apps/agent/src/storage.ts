@@ -18,7 +18,7 @@ const DECISIONS: AgentRunRecord["decision"][] = [
   "pay-escrow",
   "topup-credits"
 ];
-const FUNDING_SOURCES: BillingFundingSource[] = ["escrow", "conway-credits", "escrow-fallback"];
+const FUNDING_SOURCES: BillingFundingSource[] = ["escrow", "conway-credits", "alchemy-credits", "escrow-fallback"];
 const TOPUP_STATUSES: BillingTopupStatus[] = ["not-attempted", "ok", "skipped", "error"];
 const URGENCIES: ComputeUrgency[] = ["nominal", "elevated", "critical", "dead"];
 

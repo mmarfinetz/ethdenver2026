@@ -24,7 +24,7 @@ function makeRun(decision: AgentRunRecord["decision"], index: number): AgentRunR
     decision,
     dryRun: false,
     creditBalanceUsdc: 1_000_000n + BigInt(index),
-    fundingSource: decision === "topup-credits" ? "conway-credits" : "escrow",
+    fundingSource: decision === "topup-credits" ? (index % 2 === 0 ? "alchemy-credits" : "conway-credits") : "escrow",
     topupStatus: decision === "topup-credits" ? "ok" : "not-attempted",
     topupAmountUsdc: decision === "topup-credits" ? 123_000n : 0n,
     payerAddress: "0x00000000000000000000000000000000000000aa",
@@ -127,7 +127,7 @@ test("readRunRecords preserves supported decisions and bigint fields", async () 
     assert.equal(runs[2]?.runway?.nominalDays, 14n);
     assert.equal(runs[5]?.topupStatus, "ok");
     assert.equal(runs[5]?.topupAmountUsdc, 123_000n);
-    assert.equal(runs[5]?.fundingSource, "conway-credits");
+    assert.equal(runs[5]?.fundingSource, "alchemy-credits");
     assert.equal(runs[4]?.payerFundingUsdc, 10_005n);
     assert.equal(runs[3]?.computeBurnUsdc, 1_500n);
     assert.equal(runs[1]?.reconciliation?.withinInvariant, true);

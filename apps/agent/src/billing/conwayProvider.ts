@@ -316,6 +316,36 @@ async function readText(response: Response): Promise<string> {
   }
 }
 
+const LEGACY_REQUIRED_HEADER_NAMES = ["x-payment-requirements", "x-payment-required"] as const;
+const STANDARD_REQUIRED_HEADER_NAMES = ["payment-required"] as const;
+
+function firstHeader(headers: Headers, names: readonly string[]): string | null {
+  for (const name of names) {
+    const value = headers.get(name);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function hasHeader(headers: Headers, names: readonly string[]): boolean {
+  for (const name of names) {
+    if (headers.get(name) != null) return true;
+  }
+  return false;
+}
+
+function inferPaymentSignatureHeaderName(response: Response, defaultHeaderName: string): string {
+  if (response.headers.get("payment-signature") != null) return "payment-signature";
+  if (response.headers.get("x-payment") != null) return "x-payment";
+
+  const hasStandardRequirementHeader = hasHeader(response.headers, STANDARD_REQUIRED_HEADER_NAMES);
+  if (hasStandardRequirementHeader) {
+    return "payment-signature";
+  }
+
+  return defaultHeaderName;
+}
+
 export function extractBalanceUsdc(payload: unknown): bigint | null {
   const root = asRecord(payload);
   if (!root) return null;
@@ -492,11 +522,9 @@ function buildTransferWithAuthorizationTypedData(
 
 async function parseChallenge(response: Response, defaultHeaderName: string): Promise<X402Challenge | null> {
   let payload: unknown = null;
-  const header =
-    response.headers.get("x-payment-requirements") ??
-    response.headers.get("x-payment-required") ??
-    response.headers.get("X-Payment-Required");
-  if (header && header !== "true") {
+  const header = firstHeader(response.headers, [...LEGACY_REQUIRED_HEADER_NAMES, ...STANDARD_REQUIRED_HEADER_NAMES]);
+  const headerValue = header?.trim().toLowerCase();
+  if (header && headerValue !== "true" && headerValue !== "1") {
     try {
       payload = JSON.parse(header) as unknown;
     } catch {
@@ -526,7 +554,7 @@ async function parseChallenge(response: Response, defaultHeaderName: string): Pr
   const paymentHeaderName =
     (typeof normalized.paymentHeaderName === "string" && normalized.paymentHeaderName) ||
     (typeof normalized.paymentHeader === "string" && normalized.paymentHeader) ||
-    defaultHeaderName;
+    inferPaymentSignatureHeaderName(response, defaultHeaderName);
 
   return {
     paymentHeaderName,
@@ -563,7 +591,7 @@ function createV2PaymentHeaderValue(
   transferWithAuthorization: TransferWithAuthorizationRequirement
 ): string {
   const payload = {
-    x402Version: 1,
+    x402Version: requirement.x402Version,
     scheme: requirement.scheme,
     network: requirement.network,
     payload: {
@@ -625,7 +653,8 @@ export class ConwayBillingProvider implements ComputeBillingProvider {
 
   constructor(private readonly config: AgentConfig) {
     if (!config.conwayApiBaseUrl) {
-      throw new Error("CONWAY_API_BASE_URL is required when COMPUTE_BILLING_MODE=conway");
+      const envLabel = config.computeBillingMode === "alchemy" ? "ALCHEMY_API_BASE_URL" : "CONWAY_API_BASE_URL";
+      throw new Error(`${envLabel} is required when COMPUTE_BILLING_MODE=${config.computeBillingMode}`);
     }
   }
 
